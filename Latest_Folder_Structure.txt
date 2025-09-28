@@ -1,0 +1,96 @@
+PS C:\DATA\personal_finance> tree /F
+Folder PATH listing
+Volume serial number is ECE4-824D
+C:.
+│   folder_structure.txt
+│   Latest_Folder_Structure.txt
+│   project_tree.txt
+│   README.txt
+│
+│
+├───backups
+│       plaid_20250927_1603.db
+│       plaid_20250927_1608.db
+│
+├───config
+│   └───env
+│           .env.development
+│           .env.production
+│           .env.sandbox
+│
+├───data
+│   │   plaid.db
+│   │
+│   ├───processed
+│   └───raw
+├───logs
+│       app.log
+│       maintenance.log
+│
+├───notebooks
+├───runs
+│   │   plaid.ps1
+│   │
+│   ├───development
+│   ├───production
+│   └───sandbox
+│           run.ps1
+│
+├───scripts
+│       Install-PlaidProfileShortcuts.ps1
+│       load-env.ps1
+│       plaid_profile_snippet.ps1
+│       readme.txt
+│
+├───src
+│   │   requirements.txt
+│   │   __init__.py
+│   │
+│   ├───analysis
+│   │       analysis.py
+│   │
+│   ├───common
+│   │   │   config.py
+│   │   │   paths.py
+│   │   │   utils.py
+│   │   │   __init__.py
+│   │   │
+│   │   └───__pycache__
+│   │           config.cpython-310.pyc
+│   │           paths.cpython-310.pyc
+│   │           utils.cpython-310.pyc
+│   │           __init__.cpython-310.pyc
+│   │
+│   ├───ingestion
+│   │   │   app.py
+│   │   │   debug_db.py
+│   │   │   fire-all.ps1
+│   │   │   webhooks.py
+│   │   │   __init__.py
+│   │   │
+│   │   └───__pycache__
+│   │           app.cpython-310.pyc
+│   │           debug_db.cpython-310.pyc
+│   │           __init__.cpython-310.pyc
+│   │
+│   ├───presentation
+│   ├───processing
+│   ├───storage
+│   │   │   db.py
+│   │   │   schema.sql
+│   │   │   __init__.py
+│   │   │
+│   │   ├───backups
+│   │   │       plaid.db
+│   │   │
+│   │   └───__pycache__
+│   │           db.cpython-310.pyc
+│   │           __init__.cpython-310.pyc
+│   │
+│   ├───tools
+│   │       trigger_webhook.py
+│   │
+│   └───__pycache__
+│           __init__.cpython-310.pyc
+│
+└───tests
