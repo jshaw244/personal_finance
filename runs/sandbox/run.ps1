@@ -84,9 +84,13 @@ Write-Host "Activating .venv..." -ForegroundColor Cyan
 if (-not (Test-Path ".\src\requirements.txt")) {
     throw "Missing .\src\requirements.txt"
 }
+
+Write-Host "Ensuring latest Plaid SDK..." -ForegroundColor Cyan
+pip install --upgrade plaid-python
 Write-Host "Installing dependencies..." -ForegroundColor Cyan
 python -m pip install --upgrade pip
 python -m pip install -r .\src\requirements.txt
+
 
 # -----------------------------
 # Kill anything using port 5000 (before backups to avoid DB lock)
@@ -204,8 +208,8 @@ if ($ngrokCmd) {
         $publicUrl = $resp.tunnels[0].public_url
         if ($publicUrl) {
             Write-Host "ngrok public URL: $publicUrl" -ForegroundColor Green
-            $env:PLAID_WEBHOOK_URL = "$publicUrl/webhook"
-            Write-DbLog "INFO" "PLAID_WEBHOOK_URL set to $publicUrl/webhook"
+            $env:PLAID_WEBHOOK_URL = "$publicUrl/plaid/webhook"
+            Write-DbLog "INFO" "PLAID_WEBHOOK_URL set to $publicUrl/plaid/webhook"
         }
     } catch {
         Write-Host "Could not fetch ngrok public URL" -ForegroundColor Yellow

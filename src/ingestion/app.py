@@ -2,6 +2,7 @@ from src.common.config import load_env   # ✅ fixed
 from src.common.utils import convert, to_safe_json
 from src.storage.db import init_db, save_item, get_all_items, save_transactions, log_event_db
 import os
+import sqlite3
 
 # Choose environment via ENV_TARGET or default to 'sandbox'
 ENV_TARGET = os.getenv("ENV_TARGET", "sandbox")
@@ -31,16 +32,21 @@ PLAID_ENV = (os.getenv("PLAID_ENV") or "sandbox").lower()
 
 print(f"[Plaid Flask] Target={cfg.get('TARGET', ENV_TARGET)}  PLAID_ENV={PLAID_ENV}")
 
+# ---- Plaid Environment Mapping (new SDK) ----
 ENV_MAP = {
-    "sandbox": plaid.Environment.Sandbox,
-    "development": plaid.Environment.Development,
-    "production": plaid.Environment.Production,
+    "sandbox": "https://sandbox.plaid.com",
+    "development": "https://development.plaid.com",
+    "production": "https://production.plaid.com",
 }
-plaid_env = ENV_MAP.get(PLAID_ENV, plaid.Environment.Sandbox)
+
+plaid_host = ENV_MAP.get(PLAID_ENV, "https://sandbox.plaid.com")
 
 configuration = plaid.Configuration(
-    host=plaid_env,
-    api_key={"clientId": PLAID_CLIENT_ID, "secret": PLAID_SECRET},
+    host=plaid_host,
+    api_key={
+        "clientId": PLAID_CLIENT_ID,
+        "secret": PLAID_SECRET
+    }
 )
 api_client = plaid.ApiClient(configuration)
 client = plaid_api.PlaidApi(api_client)
@@ -87,6 +93,18 @@ def log_app(msg, level="info"):
     log_event_db("app", level.upper(), msg)
 
 log_app(f"App starting: Target={cfg.get('TARGET', ENV_TARGET)}, PLAID_ENV={PLAID_ENV}")
+
+# save_webhook_function
+def save_webhook_event(webhook_type, webhook_code, item_id, payload):
+    """Save webhook event details to the database."""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO webhook_events (received_at, webhook_type, webhook_code, item_id, payload)
+        VALUES (datetime('now'), ?, ?, ?, ?)
+    """, (webhook_type, webhook_code, item_id, str(payload)))
+    conn.commit()
+    conn.close()
 
 # ---- 1) Serve Plaid Link ----
 @app.route("/")
@@ -302,22 +320,38 @@ def transactions():
 # ---- 6) Webhook endpoint ----
 @app.route("/plaid/webhook", methods=["POST"])
 def plaid_webhook():
+    print("📬 DEBUG: /plaid/webhook endpoint hit")  # ✅ Confirm the route is reached
+
+    # Parse payload
     data = request.get_json(silent=True) or {}
+    print(f"📦 DEBUG: Raw webhook payload:\n{json.dumps(data, indent=2)}")
+
     webhook_type = data.get("webhook_type")
     webhook_code = data.get("webhook_code")
     item_id = data.get("item_id")
 
-    save_webhook_event(webhook_type, webhook_code, item_id, data)
+    print(f"🔎 DEBUG: webhook_type={webhook_type}, webhook_code={webhook_code}, item_id={item_id}")
 
+    # Save webhook to DB
+    save_webhook_event(webhook_type, webhook_code, item_id, data)
     log_app(f"Webhook received: type={webhook_type}, code={webhook_code}, item_id={item_id}")
 
+    # Handle TRANSACTIONS updates
+    log_app(f"🔎 DEBUG: webhook_type={webhook_type}, webhook_code={webhook_code}, item_id={item_id}")
+    log_app(f"🔎 DEBUG: Known item_ids in DB: {[it[0] for it in get_all_items()]}")
     if webhook_type == "TRANSACTIONS" and item_id:
+        print("✅ DEBUG: TRANSACTIONS webhook detected, searching for matching item...")
         items = get_all_items()
+        print(f"📊 DEBUG: Found {len(items)} items in DB")
+
         for it_item_id, access_token, institution in items:
+            print(f"🔁 DEBUG: Checking item {it_item_id}")
             if it_item_id == item_id:
+                print("🎯 DEBUG: Matching item found! Attempting transaction fetch...")
                 try:
                     start_date = date.today() - timedelta(days=30)
                     end_date = date.today()
+
                     req = TransactionsGetRequest(
                         access_token=access_token,
                         start_date=start_date,
@@ -339,6 +373,7 @@ def plaid_webhook():
                         }
                         for t in res.get("transactions", [])
                     ]
+                    print(f"💾 DEBUG: {len(txns)} transactions fetched and ready to save")
                     save_transactions(item_id, txns)
                     log_app(f"Webhook transactions fetched: {len(txns)} saved for item {item_id}")
 
@@ -355,11 +390,15 @@ def plaid_webhook():
                         "fetched_transactions": len(txns)
                     }))
                 except ApiException as e:
+                    print(f"❌ DEBUG: Plaid API error during webhook: {e}")
                     log_app(f"Plaid API error during webhook for item {item_id}", level="error")
                     return jsonify(convert({
                         "status": "error",
                         "detail": getattr(e, "body", str(e))
                     })), 500
+        print("⚠️ DEBUG: No matching item_id found in DB for this webhook")
+    else:
+        print("ℹ️ DEBUG: Webhook type is not TRANSACTIONS or missing item_id")
 
     return jsonify(convert({"status": "ok", "note": "Unhandled webhook"}))
 

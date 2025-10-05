@@ -1,3 +1,4 @@
-Flask==3.0.3
-plaid-python==9.0.0
-python-dotenv==1.0.1
+Flask==3.1.2
+plaid-python==36.1.0
+python-dotenv==1.1.1
+requests==2.32.3

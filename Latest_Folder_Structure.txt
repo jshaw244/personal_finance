@@ -1,33 +1,59 @@
-PS C:\DATA\personal_finance> tree /F
+(.venv) PS C:\DATA\personal_finance> tree /F
 Folder PATH listing
 Volume serial number is ECE4-824D
 C:.
-│   folder_structure.txt
+│   .gitignore
 │   Latest_Folder_Structure.txt
 │   project_tree.txt
 │   README.txt
-│
-│
+|
 ├───backups
-│       plaid_20250927_1603.db
-│       plaid_20250927_1608.db
+│       plaid_20250929_2054.db
+│       plaid_20250929_2056.db
+│       plaid_20250929_2107.db
+│       plaid_20250929_2110.db
+│       plaid_20250929_2111.db
+│       plaid_20250929_2112.db
+│       plaid_20250929_2114.db
+│       plaid_20250929_2131.db
+│       plaid_20250929_2152.db
+│       plaid_20251004_1405.db
+│       schema_20250928_2053.sql
+│       schema_20250928_2057.sql
+│       schema_20250928_2058.sql
+│       schema_20250929_2110.sql
+│       schema_20250929_2111.sql
+│       schema_20250929_2112.sql
+│       schema_20250929_2114.sql
+│       schema_20250929_2131.sql
+│       schema_20250929_2152.sql
+│       schema_20251004_1405.sql
 │
 ├───config
 │   └───env
 │           .env.development
 │           .env.production
 │           .env.sandbox
+│           .gitkeep
 │
 ├───data
+│   │   .gitkeep
 │   │   plaid.db
 │   │
 │   ├───processed
+│   │       .gitkeep
+│   │
 │   └───raw
+│           .gitkeep
+│
 ├───logs
+│       .gitkeep
 │       app.log
 │       maintenance.log
 │
 ├───notebooks
+│       .gitkeep
+│
 ├───runs
 │   │   plaid.ps1
 │   │
@@ -41,6 +67,7 @@ C:.
 │       load-env.ps1
 │       plaid_profile_snippet.ps1
 │       readme.txt
+│       trigger_webhook.py
 │
 ├───src
 │   │   requirements.txt
@@ -56,22 +83,15 @@ C:.
 │   │   │   __init__.py
 │   │   │
 │   │   └───__pycache__
-│   │           config.cpython-310.pyc
-│   │           paths.cpython-310.pyc
-│   │           utils.cpython-310.pyc
-│   │           __init__.cpython-310.pyc
+│   │           paths.cpython-313.pyc
+│   │           __init__.cpython-313.pyc
 │   │
 │   ├───ingestion
-│   │   │   app.py
-│   │   │   debug_db.py
-│   │   │   fire-all.ps1
-│   │   │   webhooks.py
-│   │   │   __init__.py
-│   │   │
-│   │   └───__pycache__
-│   │           app.cpython-310.pyc
-│   │           debug_db.cpython-310.pyc
-│   │           __init__.cpython-310.pyc
+│   │       app.py
+│   │       debug_db.py
+│   │       fire-all.ps1
+│   │       webhooks.py
+│   │       __init__.py
 │   │
 │   ├───presentation
 │   ├───processing
@@ -80,17 +100,11 @@ C:.
 │   │   │   schema.sql
 │   │   │   __init__.py
 │   │   │
-│   │   ├───backups
-│   │   │       plaid.db
-│   │   │
-│   │   └───__pycache__
-│   │           db.cpython-310.pyc
-│   │           __init__.cpython-310.pyc
-│   │
-│   ├───tools
-│   │       trigger_webhook.py
+│   │   └───backups
+│   │           .gitkeep
+│   │           plaid.db
 │   │
 │   └───__pycache__
-│           __init__.cpython-310.pyc
+│           __init__.cpython-313.pyc
 │
 └───tests
