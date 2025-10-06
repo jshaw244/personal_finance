@@ -6,6 +6,9 @@ import requests
 from pathlib import Path
 from plaid.api import plaid_api
 import plaid
+from plaid.model.sandbox_item_fire_webhook_request import SandboxItemFireWebhookRequest
+from plaid.model.webhook_type import WebhookType
+import argparse
 
 # ----------------------------
 # Setup basic logger (no emojis)
@@ -18,6 +21,9 @@ logger.addHandler(handler)
 
 def log(msg):
     logger.info(msg)
+parser = argparse.ArgumentParser()
+parser.add_argument("--classic", action="store_true", help="Send DEFAULT_UPDATE instead of SYNC_UPDATES_AVAILABLE")
+args = parser.parse_args()
 
 # ----------------------------
 # Config
@@ -37,7 +43,7 @@ cur.execute("SELECT item_id, access_token FROM items ORDER BY ROWID DESC LIMIT 1
 row = cur.fetchone()
 
 if row is None:
-    log("❌ No items found in the database. Cannot fire webhook.")
+    log("No items found in the database. Cannot fire webhook.")
     exit(1)
 
 item_id, access_token = row
@@ -65,10 +71,41 @@ client = plaid_api.PlaidApi(api_client)
 
 log("Triggering sandbox to generate new transactions...")
 try:
-    client.sandbox_transactions_fire_webhook({"access_token": access_token})
-    log("✅ Sandbox transactions webhook fired successfully.")
+    log(f"DEBUG → access_token: {access_token}")
+    fire_req = SandboxItemFireWebhookRequest(
+        access_token=str(access_token),
+        webhook_type=WebhookType(value="TRANSACTIONS"),
+        webhook_code="DEFAULT_UPDATE"
+    )
+    client.sandbox_item_fire_webhook(fire_req)
+    log("Sandbox transactions webhook fired successfully.")
 except Exception as e:
-    log(f"⚠️ Failed to fire sandbox webhook: {e}")
+    log(f"Failed to fire sandbox webhook: {e}")
+
+# --- Force Plaid to check for new transactions (Sandbox) ---
+log("Requesting on-demand transactions refresh from Plaid...")
+refresh_ok = False
+try:
+    # Modern SDKs (OpenAPI): request-model style
+    from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
+    refresh_req = TransactionsRefreshRequest(access_token=access_token)
+    client.transactions_refresh(refresh_req)
+    refresh_ok = True
+    log("transactions_refresh request sent.")
+except Exception as e1:
+    # Older SDKs sometimes expose a different interface; try legacy-style call
+    try:
+        # Some versions expose refresh via a subclient; harmless no-op if missing
+        client.Transactions.refresh(access_token)  # noqa: attribute-defined-outside-init
+        refresh_ok = True
+        log("transactions_refresh (legacy) request sent.")
+    except Exception as e2:
+        log(f"transactions_refresh not available: {e1} / {e2}")
+
+# Give Plaid a moment to synthesize new sandbox transactions
+import time
+if refresh_ok:
+    time.sleep(2)
 
 # ----------------------------
 # Count transactions before webhook
@@ -80,9 +117,10 @@ log(f"Transactions before webhook: {before_count}")
 # ----------------------------
 # Send webhook
 # ----------------------------
+webhook_code = "DEFAULT_UPDATE" if args.classic else "SYNC_UPDATES_AVAILABLE"
 payload = {
     "webhook_type": "TRANSACTIONS",
-    "webhook_code": "DEFAULT_UPDATE",
+    "webhook_code": webhook_code,
     "item_id": item_id
 }
 
