@@ -85,11 +85,56 @@ if (-not (Test-Path ".\src\requirements.txt")) {
     throw "Missing .\src\requirements.txt"
 }
 
-Write-Host "Ensuring latest Plaid SDK..." -ForegroundColor Cyan
-pip install --upgrade plaid-python
-Write-Host "Installing dependencies..." -ForegroundColor Cyan
-python -m pip install --upgrade pip
-python -m pip install -r .\src\requirements.txt
+# -----------------------------
+# One-time Plaid SDK upgrade check
+# -----------------------------
+Write-Host "Checking for Plaid SDK version changes..."
+$checkUpgradeScript = "tools\check_upgrade.py"
+$maintenanceLog = "logs\maintenance.log"
+
+# Capture current installed version (if any) and required version from requirements.txt
+$currentVersion = (pip show plaid-python 2>$null | Select-String -Pattern "Version:" | ForEach-Object { ($_ -split ":")[1].Trim() })
+$requiredVersion = (Get-Content "src\requirements.txt" | Select-String -Pattern "plaid-python==" | ForEach-Object { ($_ -split "==")[1].Trim() })
+
+if (-not $currentVersion) { $currentVersion = "Not installed" }
+if (-not $requiredVersion) { $requiredVersion = "Unknown" }
+
+Write-Host "Installed plaid-python version: $currentVersion"
+Write-Host "Required plaid-python version:  $requiredVersion"
+
+# Version drift warning (even if .upgrade_ack exists)
+if ($currentVersion -ne $requiredVersion -and $requiredVersion -ne "Unknown") {
+    Write-Host "WARNING: plaid-python version mismatch!" -ForegroundColor Yellow
+    Write-Host "   Installed: $currentVersion" -ForegroundColor DarkYellow
+    Write-Host "   Required:  $requiredVersion" -ForegroundColor DarkYellow
+    Write-Host "   → Consider re-running the upgrade check or reinstalling dependencies." -ForegroundColor Yellow
+}
+
+if (Test-Path $checkUpgradeScript) {
+    try {
+        $upgradeOutput = python $checkUpgradeScript 2>&1
+        Write-Host $upgradeOutput
+
+        # Log the results with a timestamp and version info
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Add-Content -Path $maintenanceLog -Value "[$timestamp] Plaid upgrade check output:"
+        Add-Content -Path $maintenanceLog -Value "Installed version: $currentVersion"
+        Add-Content -Path $maintenanceLog -Value "Required version:  $requiredVersion"
+        Add-Content -Path $maintenanceLog -Value $upgradeOutput
+        Add-Content -Path $maintenanceLog -Value "----------------------------------------`n"
+    }
+    catch {
+        Write-Host "Upgrade check failed: $_"
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Add-Content -Path $maintenanceLog -Value "[$timestamp] Plaid upgrade check failed: $_"
+    }
+} else {
+    Write-Host "check_upgrade.py not found. Skipping upgrade check."
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $maintenanceLog -Value "[$timestamp] Plaid upgrade check skipped (script not found)."
+    Add-Content -Path $maintenanceLog -Value "Installed version: $currentVersion"
+    Add-Content -Path $maintenanceLog -Value "Required version:  $requiredVersion"
+}
 
 
 # -----------------------------
@@ -128,14 +173,16 @@ function Write-DbLog {
     # Build Python snippet safely using placeholders
     $pythonCode = @'
 import sys, pathlib, os
-project_root = r"__PROJECT_ROOT__"
+project_root = "__PROJECT_ROOT__"
 sys.path.insert(0, str(pathlib.Path(project_root) / "src"))
 from src.storage.db import log_event_db
 log_event_db("runscript", "__LEVEL__", "__MESSAGE__")
 '@
 
     # Fill placeholders (ProjectRoot is a STRING now; no .Replace() on PathInfo)
-    $pythonCode = $pythonCode.Replace("__PROJECT_ROOT__", $ProjectRoot)
+    #  Convert backslashes to forward slashes to avoid invalid escape warnings
+    $escapedRoot = $ProjectRoot -replace '\\', '/'
+    $pythonCode = $pythonCode.Replace("__PROJECT_ROOT__", $escapedRoot)
     $pythonCode = $pythonCode.Replace("__LEVEL__", $level)
     $pythonCode = $pythonCode.Replace("__MESSAGE__", $message)
 

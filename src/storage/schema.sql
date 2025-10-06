@@ -71,3 +71,11 @@ CREATE TABLE IF NOT EXISTS maintenance_log (
     key TEXT PRIMARY KEY,
     last_run TIMESTAMP
 );
+
+
+-- Cursor for /transactions/sync
+CREATE TABLE IF NOT EXISTS transaction_cursors (
+  item_id TEXT PRIMARY KEY,
+  cursor  TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
