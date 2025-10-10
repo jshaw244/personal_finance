@@ -1,0 +1,159 @@
+# session_snapshot_schema.yaml
+# Defines the expected structure of environment and database snapshot files
+# produced by make_session_snapshot.py and inspect_snapshot_db_state.py
+
+snapshot:
+  description: >
+    Top-level container describing a single project snapshot, capturing
+    environment state, database metrics, documentation coverage, and
+    relevant Git metadata at a specific point in time.
+
+  fields:
+
+    project:
+      type: string
+      description: Name of the project or system (e.g., "personal_finance")
+
+    root:
+      type: string
+      description: Absolute path to the project root directory on disk
+
+    date_local:
+      type: string
+      format: "YYYY-MM-DD HH:MM:SS TZ"
+      description: Local timestamp when the snapshot was created
+
+    platform:
+      type: object
+      properties:
+        system:
+          type: string
+          description: Operating system (e.g., "Windows", "Linux")
+        release:
+          type: string
+          description: OS release or version string
+
+    versions:
+      type: object
+      description: Captures Python and package versions at runtime
+      properties:
+        python:
+          type: string
+        plaid-python:
+          type: string
+        flask:
+          type: string
+        python-dotenv:
+          type: string
+
+    git:
+      type: object
+      description: Information about current Git repository state
+      properties:
+        branch:
+          type: string
+        short_commit:
+          type: string
+        dirty:
+          type: boolean
+        latest_tag:
+          type: string
+          description: Most recent Git tag at snapshot time
+
+    env:
+      type: object
+      description: Key runtime environment variables
+      properties:
+        ENV_TARGET:
+          type: string
+          description: Environment name (sandbox, development, production)
+        PLAID_ENV:
+          type: string
+          description: Plaid API environment ("sandbox", "development", etc.)
+
+    web:
+      type: object
+      description: Webhook and local URL configuration
+      properties:
+        local_url:
+          type: string
+        webhook_endpoint_prefix:
+          type: string
+        ngrok_public_url:
+          type: string
+
+    db:
+      type: object
+      description: Database connection and record counts
+      properties:
+        path:
+          type: string
+        exists:
+          type: boolean
+        items_count:
+          type: integer
+        accounts_count:
+          type: integer
+        transactions_count:
+          type: integer
+        webhook_events_count:
+          type: integer
+        cursor_table_present:
+          type: boolean
+
+    recent_webhook_events:
+      type: array
+      description: List of most recent webhook events received
+      items:
+        type: object
+        properties:
+          received_at:
+            type: string
+          webhook_type:
+            type: string
+          webhook_code:
+            type: string
+          item_id:
+            type: string
+
+    docs:
+      type: object
+      description: Documentation coverage summary
+      properties:
+        exists:
+          type: boolean
+        file_count:
+          type: integer
+        existing_sections:
+          type: array
+          items: { type: string }
+        missing_sections:
+          type: array
+          items: { type: string }
+
+    files_of_interest:
+      type: object
+      description: Key project files and their locations
+      properties:
+        schema_sql: { type: string }
+        webhooks_py: { type: string }
+        run_ps1: { type: string }
+        requirements: { type: string }
+        logs_dir: { type: string }
+
+    db_summary:
+      type: object
+      description: Optional database inspection summary appended later
+      properties:
+        transaction_table_rows:
+          type: integer
+        webhook_table_rows:
+          type: integer
+        last_inspected:
+          type: string
+
+    next_actions_placeholder:
+      type: array
+      description: Optional list of user-defined action notes
+      items:
+        type: string

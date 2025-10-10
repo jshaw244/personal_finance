@@ -124,7 +124,7 @@ def fetch_transactions_get(client, access_token: str, days: int = 30):
         if offset >= total or not txs:
             break
     return all_tx
-
+WEBHOOKS_VERSION = "2025-10-06-sync-diag-1"
 @webhooks_bp.route("/webhook", methods=["POST"])
 def webhook():
     payload = request.get_json(silent=True) or {}
@@ -211,5 +211,6 @@ def webhook():
         "added_total": totals["added"],
         "modified_total": totals["modified"],
         "removed_total": totals["removed"],
-        "inserted": inserted
+        "inserted": inserted,
+        "version": WEBHOOKS_VERSION
     }), 200
