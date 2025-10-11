@@ -27,6 +27,19 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# --- Safety check: ensure we are on a branch (not detached HEAD) ---
+if ($branch -eq "HEAD") {
+    Write-Host "Detected detached HEAD. Attempting to check out default branch..."
+    $defaultBranch = (git remote show origin | Select-String "HEAD branch:" | ForEach-Object { ($_ -split ":")[1].Trim() })
+    if (-not $defaultBranch) { $defaultBranch = "main" }
+    git checkout $defaultBranch
+    $branch = $defaultBranch
+} else {
+    Write-Host "Current Git branch: $branch"
+}
+
+
+
 # --- Step 2: Tag-only mode ---
 if ($TagOnly) {
     if (-not (Test-Path ".git")) {
