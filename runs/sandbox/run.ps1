@@ -19,6 +19,51 @@ $ErrorActionPreference = "Stop"
 $BackupKeep = 10
 
 # -----------------------------
+# MODE SELECTION
+# -----------------------------
+param(
+    [switch]$Maintenance
+)
+
+if ($Maintenance) {
+    Write-Host "Entering maintenance mode..." -ForegroundColor Cyan
+    # Go to project root and activate venv
+    $ProjectRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
+    Set-Location -Path $ProjectRoot
+    if (-not (Test-Path ".\.venv")) {
+        Write-Host "Virtual environment not found. Creating..." -ForegroundColor Yellow
+        python -m venv .venv
+    }
+    Write-Host "Activating virtual environment..." -ForegroundColor Cyan
+    . .\.venv\Scripts\Activate.ps1
+
+    # Set up core environment variables for sandbox context
+    $env:ENV_TARGET = "sandbox"
+    $env:PYTHONPATH = $ProjectRoot
+
+    Write-Host ""
+    Write-Host "Maintenance environment ready." -ForegroundColor Green
+    Write-Host "Virtual environment: .venv"
+    Write-Host "Project root:        $ProjectRoot"
+    Write-Host "Environment target:  $env:ENV_TARGET"
+    Write-Host ""
+    Write-Host "You may now safely run scripts such as:"
+    Write-Host "  .\scripts\update_requirements.ps1"
+    Write-Host "  .\scripts\make_session_snapshot.py"
+    Write-Host "  .\scripts\inspect_db.py"
+    Write-Host ""
+    Write-Host "Dropping into maintenance shell. Type 'exit' or 'deactivate' when finished." -ForegroundColor Cyan
+    Start-Sleep -Seconds 1
+    powershell -NoExit -Command {
+    . .\.venv\Scripts\Activate.ps1
+    $env:ENV_TARGET = "sandbox"
+    $env:PYTHONPATH = (Get-Location).Path
+    Write-Host "`nMaintenance shell ready. You can now run scripts safely.`n" -ForegroundColor Green
+}
+exit 0
+}
+
+# -----------------------------
 # Resolve project root & critical paths
 # -----------------------------
 # This script lives in: <project>\runs\sandbox\run.ps1 → go up two levels
