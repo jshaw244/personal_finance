@@ -1,3 +1,10 @@
+# -----------------------------
+# MODE SELECTION
+# -----------------------------
+param(
+    [switch]$Maintenance
+)
+
 # runs/sandbox/run.ps1
 # Purpose: One-click start for the sandbox environment.
 # What it does:
@@ -18,12 +25,6 @@
 $ErrorActionPreference = "Stop"
 $BackupKeep = 10
 
-# -----------------------------
-# MODE SELECTION
-# -----------------------------
-param(
-    [switch]$Maintenance
-)
 
 if ($Maintenance) {
     Write-Host "Entering maintenance mode..." -ForegroundColor Cyan
