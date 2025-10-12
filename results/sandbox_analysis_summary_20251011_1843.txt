@@ -1,0 +1,6 @@
+Analysis summary for 'sandbox' — 20251011_1843
+Total outflow: 198,745.41
+Total inflow:  71,711.15
+Net:           -127,034.26
+Months covered: 7
+Recurring candidates: 3
