@@ -1,6 +1,7 @@
 project: personal_finance
+session_source: manual_or_unknown
 root: "C:\\DATA\\personal_finance"
-date_local: "2025-10-10 23:49:14 Central Daylight Time"
+date_local: "2025-10-11 21:38:31 Central Daylight Time"
 platform:
   system: Windows
   release: 11
@@ -19,7 +20,7 @@ env:
 web:
   local_url: "http://127.0.0.1:5000"
   webhook_endpoint_prefix: /plaid
-  ngrok_public_url: "https://03cd90c8a642.ngrok-free.app"
+  ngrok_public_url: "https://0a429ef28c18.ngrok-free.app"
 db:
   path: "C:\\DATA\\personal_finance\\data\\plaid.db"
   exists: True
