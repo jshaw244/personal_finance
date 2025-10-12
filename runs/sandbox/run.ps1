@@ -2,7 +2,11 @@
 # MODE SELECTION
 # -----------------------------
 param(
-    [switch]$Maintenance
+    [switch]$Maintenance,
+    [switch]$IncludeAnalysis,
+    [int]$AnalysisDays = 30,
+    [string]$AnalysisStart = "",
+    [string]$AnalysisEnd = ""
 )
 
 # runs/sandbox/run.ps1
@@ -346,3 +350,67 @@ python -m src.ingestion.debug_db logs 20
 "@ | Out-File -FilePath $debugScriptPath -Encoding UTF8 -Force
 
 Start-Process powershell -ArgumentList @("-NoExit", "-File", $debugScriptPath)
+
+# -----------------------------
+# Optional: Run analysis immediately after startup
+# -----------------------------
+if ($IncludeAnalysis) {
+    Write-Host "`nLaunching sandbox analysis post-startup..." -ForegroundColor Cyan
+
+    $runAnalysis = Join-Path $ProjectRoot "scripts\run_analysis.ps1"
+    $logFile = Join-Path $ProjectRoot "logs\maintenance.log"
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+    if (-not (Test-Path $runAnalysis)) {
+        Write-Host "run_analysis.ps1 not found — skipping automatic analysis." -ForegroundColor Yellow
+        Add-Content -Path $logFile -Value "[$timestamp] WARNING — run_analysis.ps1 not found; skipped auto-analysis."
+        Write-DbLog "WARNING" "run_analysis.ps1 not found; skipped auto-analysis."
+    }
+    else {
+        try {
+            # Build argument list dynamically and safely
+            $argList = @()
+
+            # Always specify target first
+            $argList += @("-Target", "sandbox")
+
+            # Add analysis window parameters conditionally
+            if ($AnalysisStart -and $AnalysisEnd) {
+                $argList += @("-Start", $AnalysisStart, "-End", $AnalysisEnd)
+            }
+            elseif ($AnalysisDays -and ($AnalysisDays -is [int])) {
+                $argList += @("-Days", $AnalysisDays)
+            }
+            else {
+                # Default fallback to 30 days if nothing specified
+                $argList += @("-Days", 30)
+            }
+
+            $argsSummary = ($argList -join ' ')
+            Write-Host "Executing run_analysis.ps1 with args: $argsSummary" -ForegroundColor DarkCyan
+
+            # Log to maintenance file and DB
+            Add-Content -Path $logFile -Value "[$timestamp] INFO — Starting automated analysis with args: $argsSummary"
+            Write-DbLog "INFO" "Starting automated analysis with args: $argsSummary"
+
+            # Execute analysis script with constructed argument list
+            # Ensure proper path resolution and argument passing
+            $resolvedScript = (Resolve-Path $runAnalysis).Path
+            & powershell -ExecutionPolicy Bypass -File $resolvedScript @argList
+
+            # Log success
+            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Add-Content -Path $logFile -Value "[$timestamp] SUCCESS — Sandbox analysis completed successfully."
+            Write-DbLog "INFO" "Sandbox analysis completed successfully."
+            Write-Host "Sandbox analysis completed and logged." -ForegroundColor Green
+        }
+        catch {
+            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Add-Content -Path $logFile -Value "[$timestamp] ERROR — Sandbox analysis failed: $_"
+            Write-DbLog "ERROR" "Sandbox analysis failed: $_"
+            Write-Host "Warning: sandbox analysis failed to execute — $_" -ForegroundColor Yellow
+        }
+    }
+}
+
+
