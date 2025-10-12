@@ -29,34 +29,46 @@ function Write-Log {
     Add-Content -Path $logFile -Value "[$ts] DOCS ACTION — $Message"
 }
 
-# --- Documentation Sections ---
-$sections = @{
-    "automation" = @"
+# --- Section Content ---
+$automationDoc = @"
 # Automation Module — PowerShell + Workflow Orchestration
 **Path:** `/docs/automation`  
 **Related Code:** `scripts/update_requirements.ps1`, `runs/sandbox/run.ps1`
 "@
-    "ingestion" = @"
+
+$ingestionDoc = @"
 # Ingestion Module — Plaid Webhook & Data Sync
 **Path:** `/docs/ingestion`  
 **Related Code:** `src/ingestion/webhooks.py`, `scripts/trigger_webhook.py`
 "@
-    "analysis" = @"
+
+$analysisDoc = @"
 # Analysis Module — Data Exploration and Insight
 **Path:** `/docs/analysis`  
 **Related Code:** `src/analysis/analysis.py`, `scripts/explore_transactions.py`
 "@
-    "processing" = @"
+
+$processingDoc = @"
 # Processing Module — Data Transformation and Cleaning
 **Path:** `/docs/processing`  
 **Related Code:** `src/processing/` (planned)
 "@
-    "storage" = @"
+
+$storageDoc = @"
 # Storage Module — Database Design and Schema Management
 **Path:** `/docs/storage`  
 **Related Code:** `src/storage/db.py`, `src/storage/schema.sql`
 "@
-}
+
+# Combine into hashtable after defining each here-string
+$sections = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+$sections["automation"]  = $automationDoc
+$sections["ingestion"]   = $ingestionDoc
+$sections["analysis"]    = $analysisDoc
+$sections["processing"]  = $processingDoc
+$sections["storage"]     = $storageDoc
+
+
 
 # --- Step 1: Create folder structure ---
 Write-Host "Creating documentation structure under $docsRoot..."

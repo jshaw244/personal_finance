@@ -5,3 +5,13 @@ backups/
 *.db
 .env*
 ngrok.exe
+
+# Ignore runtime output
+/results/
+/logs/
+/archive/
+
+/*.xlsx
+/*.csv
+/*.png
+/*.txt
