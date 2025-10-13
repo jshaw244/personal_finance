@@ -1,4 +1,4 @@
-﻿# scripts/update_requirements.ps1
+# scripts/update_requirements.ps1
 <#
 .SYNOPSIS
     Automate environment freezes, session snapshots, commits, tagging, and optional pushing to GitHub.
@@ -142,3 +142,4 @@ Write-Host "Snapshot file: $snapshotPath"
 Write-Host "Git tag: $tagName"
 Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Write-Host "Done."
+

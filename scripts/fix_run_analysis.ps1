@@ -234,3 +234,4 @@ try {
 # 4) Try executing it (expect normal runtime messages if prerequisites missing, but no syntax error)
 "--- Running script ---"
 powershell -NoProfile -ExecutionPolicy Bypass -File $path
+

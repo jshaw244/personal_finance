@@ -172,3 +172,4 @@ if (Test-Path $inspectScript) {
 # --- Step 5: Finalize ---
 Write-Host "`nDocumentation creation + Git commit + snapshot + DB log complete."
 Write-Log "Documentation creation + Git commit + snapshot + DB log complete"
+

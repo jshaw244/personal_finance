@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Analysis Reports</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; background: #f8f9fa; }
+      h1 { color: #333; }
+      table { border-collapse: collapse; width: 100%; background: #fff; }
+      th, td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; text-align: left; }
+      th { background: #f1f3f4; }
+      a { color: #0078d7; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      img { max-width: 400px; margin: 1rem; border-radius: 8px; box-shadow: 0 0 4px rgba(0,0,0,.1); }
+      .img-grid { display: flex; flex-wrap: wrap; }
+      .latest { background: #fff; padding:1rem; border-radius:8px; margin-bottom:2rem; box-shadow:0 0 4px rgba(0,0,0,.05); }
+    </style>
+  </head>
+  <body>
+    <h1>📊 Analysis Reports</h1>
+    <p>Showing most recent analytics results in <code>/results</code></p>
+
+    {% if files %}
+    <div class="latest">
+      <h2>Latest Summary</h2>
+      <p><strong>{{ files[0].name }}</strong> — {{ files[0].mtime }} ({{ files[0].size }} KB)</p>
+      <p><a href="/reports/file/{{ files[0].name }}">Download Latest File →</a></p>
+    </div>
+    {% endif %}
+
+    <h2>All Files</h2>
+    <table>
+      <tr><th>Filename</th><th>Modified</th><th>Type</th><th>Size (KB)</th></tr>
+      {% for f in files %}
+      <tr>
+        <td><a href="/reports/file/{{ f.name }}">{{ f.name }}</a></td>
+        <td>{{ f.mtime }}</td>
+        <td>{{ f.suffix }}</td>
+        <td style="text-align:right">{{ f.size }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    <h2>Latest Charts</h2>
+    <div class="img-grid">
+      {% for img in images %}
+      <div><img src="/reports/file/{{ img.name }}" alt="{{ img.name }}"><br>{{ img.name }}</div>
+      {% endfor %}
+    </div>
+
+    <p><a href="/">← Back to Home</a></p>
+  </body>
+</html>
