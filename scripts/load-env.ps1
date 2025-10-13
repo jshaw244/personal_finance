@@ -19,3 +19,4 @@ Get-Content $envFile | ForEach-Object {
 Write-Host "✅ Loaded environment variables from $envFile" -ForegroundColor Green
 Write-Host "PLAID_CLIENT_ID: $env:PLAID_CLIENT_ID"
 Write-Host "PLAID_ENV:       $env:PLAID_ENV"
+

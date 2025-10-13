@@ -1,68 +1,59 @@
 <#
 .SYNOPSIS
-    Clean and validate a PowerShell script.
+    Cleans PowerShell files of encoding and formatting issues that cause phantom parse errors.
 .DESCRIPTION
-    - Removes emojis / non-ASCII characters
-    - Normalizes smart quotes and dashes
-    - Verifies balanced braces and parser syntax
-    - Rewrites file in plain ASCII (no BOM)
-.EXAMPLE
-    .\sanitize_ps.ps1 "C:\DATA\personal_finance\scripts\run_analysis.ps1"
+    - Recursively scans for .ps1 files under a given path
+    - Removes non-printable characters
+    - Normalizes line endings to CRLF
+    - Saves files as UTF8 with BOM
+    - Logs all actions to logs/sanitizer.log
+.PARAMETER Path
+    Root directory to scan
+.PARAMETER Pattern
+    Wildcard pattern (default: *.ps1)
 #>
 
 param(
-    [Parameter(Mandatory)]
-    [string]$Path
+    [string]$Path = ".",
+    [string]$Pattern = "*.ps1"
 )
 
-if (-not (Test-Path $Path)) {
-    Write-Host "❌ File not found: $Path" -ForegroundColor Red
-    exit 1
+$ErrorActionPreference = "Stop"
+$ProjectRoot = (Resolve-Path "$Path").Path
+$LogDir = Join-Path $ProjectRoot "logs"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+$LogFile = Join-Path $LogDir "sanitizer.log"
+
+function Write-Log {
+    param([string]$msg)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $LogFile -Value "[$ts] SANITIZER - $msg"
+    Write-Host $msg
 }
 
-Write-Host "Sanitizing: $Path" -ForegroundColor Cyan
-$raw = Get-Content $Path -Raw
+Write-Host "Scanning for PowerShell files under $ProjectRoot ..." -ForegroundColor Cyan
+$files = Get-ChildItem -Path $ProjectRoot -Recurse -Filter $Pattern -File
 
-# --- 1️⃣  Replace smart quotes / dashes ---
-$raw = $raw -replace "[“”]", '"'           # double quotes
-$raw = $raw -replace "[‘’]", "'"           # single quotes
-$raw = $raw -replace "[–—−]", "-"          # dashes and minus
+foreach ($file in $files) {
+    try {
+        $raw = Get-Content $file.FullName -Raw -ErrorAction Stop
 
-# --- 2️⃣  Remove emojis & non-ASCII chars ---
-# Keeps ASCII 32–126 + newline/tab
-$clean = -join ($raw.ToCharArray() | ForEach-Object {
-    if ([int][char]$_ -ge 32 -and [int][char]$_ -le 126 -or $_ -match "`r|`n|`t") { $_ }
-})
+        # Remove non-printable and zero-width characters
+        $clean = ($raw -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\u200B-\u200D\uFEFF]', '')
 
-# --- 3️⃣  Count braces ---
-$counts = @{
-    '{' = ($clean.ToCharArray() | Where-Object {$_ -eq '{'}).Count
-    '}' = ($clean.ToCharArray() | Where-Object {$_ -eq '}'}).Count
-    '(' = ($clean.ToCharArray() | Where-Object {$_ -eq '('}).Count
-    ')' = ($clean.ToCharArray() | Where-Object {$_ -eq ')'}).Count
-    '[' = ($clean.ToCharArray() | Where-Object {$_ -eq '['}).Count
-    ']' = ($clean.ToCharArray() | Where-Object {$_ -eq ']'}).Count
+        # Normalize line endings to CRLF
+        $clean = $clean -replace "`r?`n", "`r`n"
+
+        # Force UTF8 with BOM to ensure PowerShell parser compatibility
+        $clean | Out-File -FilePath $file.FullName -Encoding UTF8 -Force
+
+        Write-Log "Sanitized $($file.FullName)"
+    }
+    catch {
+        Write-Log "ERROR processing $($file.FullName): $_"
+    }
 }
 
-# --- 4️⃣  Write clean copy ---
-$backup = "$Path.bak_$(Get-Date -Format yyyyMMdd_HHmmss)"
-Copy-Item $Path $backup -Force
-$clean | Out-File $Path -Encoding ascii -Force
+Write-Log "Sanitization complete. Total files: $($files.Count)"
+Write-Host "Sanitization complete. Log written to $LogFile" -ForegroundColor Green
 
-# --- 5️⃣  Validate parse ---
-try {
-    [void][System.Management.Automation.Language.Parser]::ParseFile($Path,[ref]$null,[ref]$null)
-    $status = "OK"
-    $color = "Green"
-} catch {
-    $status = "ERROR"
-    $color = "Red"
-    $errMsg = $_.Exception.Message
-}
-
-Write-Host "`nBrace count:" ("{=$($counts['{'])  }=$($counts['}'])  (=$($counts['('])  )=$($counts[')'])  [=$($counts['['])  ]=$($counts[']'])")
-Write-Host "Parser check: $status" -ForegroundColor $color
-if ($status -eq "ERROR") { Write-Host " → $errMsg" -ForegroundColor Red }
-
-Write-Host "Backup saved as: $backup" -ForegroundColor Yellow
-Write-Host "Cleaned file written to: $Path" -ForegroundColor Green

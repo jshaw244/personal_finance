@@ -79,3 +79,6 @@ CREATE TABLE IF NOT EXISTS transaction_cursors (
   cursor  TEXT,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+--test
+--ALTER TABLE webhook_events ADD COLUMN test_col_python TEXT;

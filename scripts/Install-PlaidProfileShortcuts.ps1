@@ -29,3 +29,4 @@ if ($profileText -notmatch [regex]::Escape($marker)) {
 }
 
 Write-Host "Close and reopen PowerShell, then run: Start-PlaidSandbox" -ForegroundColor Cyan
+

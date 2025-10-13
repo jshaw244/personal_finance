@@ -56,3 +56,4 @@ if (Test-Path $validationLog) {
 }
 
 Write-Host "`nDone."
+

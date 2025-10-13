@@ -1,3 +1,4 @@
+   
 """
 Unified analytics suite for the personal_finance project.
 
