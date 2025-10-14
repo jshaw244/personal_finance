@@ -14,10 +14,37 @@
       img { max-width: 400px; margin: 1rem; border-radius: 8px; box-shadow: 0 0 4px rgba(0,0,0,.1); }
       .img-grid { display: flex; flex-wrap: wrap; }
       .latest { background: #fff; padding:1rem; border-radius:8px; margin-bottom:2rem; box-shadow:0 0 4px rgba(0,0,0,.05); }
+
+      #controls { margin-top:1.5rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+      #cards { display:flex; flex-wrap:wrap; gap:1rem; margin-top:1rem; }
+      .card {
+        background:#fff; padding:1rem 1.25rem; border-radius:8px;
+        box-shadow:0 0 4px rgba(0,0,0,.05);
+        flex:1 1 220px; min-width:220px;
+      }
+      .card h3 { margin:0 0 .25rem; font-size:1rem; color:#555; }
+      .card p { margin:0; font-size:1.2rem; font-weight:600; }
+      #charts { margin-top: 2rem; }
+      .chart { margin-bottom: 3rem; }
+
+      /* Panels */
+      .panel { background:#fff; padding:1rem 1.25rem; border-radius:8px; box-shadow:0 0 4px rgba(0,0,0,.05); margin-top:2rem; }
+      .panel h2 { margin-top:0; font-size:1.25rem; }
+      .row { display:flex; gap:1rem; flex-wrap:wrap; }
+      .col { flex:1 1 320px; min-width:320px; }
+      .input-row { display:flex; gap:.5rem; flex-wrap:wrap; margin:.5rem 0; }
+      input[type="number"], input[type="text"] { padding:.4rem .5rem; border:1px solid #ccc; border-radius:6px; }
+      button { padding:.45rem .75rem; background:#0078d7; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+      button:hover { background:#005fa3; }
+      .small { font-size:.9rem; color:#666; }
+      .success { color:#0a7; }
+      .warn { color:#c60; }
     </style>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   </head>
   <body>
-    <h1>📊 Analysis Reports</h1>
+    <h1>Analysis Reports</h1>
+    <p><a href="/">← Back to Home</a></p>
     <p>Showing most recent analytics results in <code>/results</code></p>
 
     {% if files %}
@@ -28,26 +55,314 @@
     </div>
     {% endif %}
 
-    <h2>All Files</h2>
-    <table>
-      <tr><th>Filename</th><th>Modified</th><th>Type</th><th>Size (KB)</th></tr>
-      {% for f in files %}
-      <tr>
-        <td><a href="/reports/file/{{ f.name }}">{{ f.name }}</a></td>
-        <td>{{ f.mtime }}</td>
-        <td>{{ f.suffix }}</td>
-        <td style="text-align:right">{{ f.size }}</td>
-      </tr>
-      {% endfor %}
-    </table>
+    <div id="controls">
+      <label for="range">Time Range:</label>
+      <select id="range">
+        <option value="30d">Last 30 Days</option>
+        <option value="ytd">Year-to-Date</option>
+        <option value="12m">Last 12 Months</option>
+      </select>
+      <span id="status" class="small"></span>
+    </div>
 
-    <h2>Latest Charts</h2>
-    <div class="img-grid">
-      {% for img in images %}
-      <div><img src="/reports/file/{{ img.name }}" alt="{{ img.name }}"><br>{{ img.name }}</div>
-      {% endfor %}
+    <div id="cards">
+      <div class="card"><h3>Total Spent</h3><p id="card-total">–</p></div>
+      <div class="card"><h3>Average Txn Size</h3><p id="card-avg">–</p></div>
+      <div class="card"><h3>MoM % Change</h3><p id="card-mom">–</p></div>
+      <div class="card"><h3>YTD % Change</h3><p id="card-ytd">–</p></div>
+      <div class="card"><h3>Daily Allowance</h3><p id="card-allow">–</p><div class="small" id="card-allow-mode"></div></div>
+    </div>
+
+    {% if files %}
+      <h2>All Files</h2>
+      <table>
+        <tr><th>Filename</th><th>Modified</th><th>Type</th><th>Size (KB)</th></tr>
+        {% for f in files %}
+        <tr>
+          <td><a href="/reports/file/{{ f.name }}">{{ f.name }}</a></td>
+          <td>{{ f.mtime }}</td>
+          <td>{{ f.suffix }}</td>
+          <td style="text-align:right">{{ f.size }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p>No analysis results found yet.</p>
+    {% endif %}
+
+    {% if images %}
+      <h2>Latest Charts (Static PNGs)</h2>
+      <div class="img-grid">
+        {% for img in images %}
+        <div>
+          <img src="/reports/file/{{ img.name }}" alt="{{ img.name }}"><br>{{ img.name }}
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div id="charts">
+      <h2>Interactive Dashboard</h2>
+      <div id="chart-category" class="chart"></div>
+      <div id="chart-monthly" class="chart"></div>
+      <div id="chart-merchants" class="chart"></div>
+      <div id="chart-cashflow" class="chart"></div>
+    </div>
+
+    <!-- Budget / Forecast / Paycheck / Utilities -->
+    <div class="panel">
+      <h2>Budget and Forecast</h2>
+      <div class="row">
+        <div class="col">
+          <h3>Budget vs Actual</h3>
+          <div class="input-row">
+            <input id="budget-month" type="text" placeholder="YYYY-MM (optional)" />
+            <button onclick="loadBudget()">Load</button>
+            <button onclick="saveBudget()">Save</button>
+          </div>
+          <div id="budget-status" class="small"></div>
+          <div id="chart-budget" class="chart"></div>
+        </div>
+        <div class="col">
+          <h3>Cashflow Forecast</h3>
+          <div id="chart-forecast" class="chart"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Paycheck Estimator</h2>
+      <div class="input-row">
+        <input id="pe-gross" type="number" step="0.01" placeholder="Gross per paycheck" />
+        <input id="pe-periods" type="number" step="1" value="26" />
+        <input id="pe-fed" type="number" step="0.01" value="0.18" />
+        <input id="pe-state" type="number" step="0.01" value="0.05" />
+        <input id="pe-other" type="number" step="0.01" placeholder="Other deductions" value="0" />
+        <button onclick="calcPaycheck()">Estimate</button>
+      </div>
+      <div class="small">Fields: gross, pay periods per year, federal rate, state rate, other deductions.</div>
+      <div id="pe-out" class="small"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Insights</h2>
+      <div id="insights" class="small">Loading insights…</div>
+    </div>
+
+    <div class="panel">
+      <h2>Password Generator</h2>
+      <div class="input-row">
+        <input id="pw-length" type="number" value="16" min="8" max="128" />
+        <label><input id="pw-special" type="checkbox" checked /> Include special</label>
+        <button onclick="genPassword()">Generate</button>
+      </div>
+      <div id="pw-out" class="small"></div>
     </div>
 
     <p><a href="/">← Back to Home</a></p>
+
+    <script>
+    const REFRESH_MS = 60000;
+    let timer;
+
+    async function fetchJSON(url, opts) {
+      const r = await fetch(url, opts);
+      return await r.json();
+    }
+
+    async function loadSummaryCards(range) {
+      const kpi = await fetchJSON('/reports/api/kpi_summary?range=' + range);
+      if (!kpi || kpi.error) return;
+      document.getElementById('card-total').textContent = '$' + kpi.total_spent.toFixed(2);
+      document.getElementById('card-avg').textContent = '$' + kpi.avg_txn.toFixed(2);
+      document.getElementById('card-mom').textContent = kpi.mom_pct.toFixed(1) + '%';
+      document.getElementById('card-ytd').textContent = kpi.ytd_pct.toFixed(1) + '%';
+
+      const da = await fetchJSON('/reports/api/daily_allowance');
+      if (!da.error) {
+        document.getElementById('card-allow').textContent = '$' + da.daily_allowance.toFixed(2);
+        const modeEl = document.getElementById('card-allow-mode');
+        modeEl.textContent = da.mode === 'accumulation'
+          ? 'Accumulation day'
+          : 'Depletion day';
+        modeEl.className = da.mode === 'accumulation' ? 'small success' : 'small warn';
+      }
+    }
+
+    async function loadCharts() {
+      const range = document.getElementById('range').value;
+      document.getElementById('status').textContent = 'Updating charts (' + range + ') ...';
+      try {
+        const [catData, trend, merchants, cashflow] = await Promise.all([
+          fetchJSON('/reports/api/spending_by_category?range=' + range),
+          fetchJSON('/reports/api/monthly_trend?range=' + range),
+          fetchJSON('/reports/api/top_merchants?range=' + range),
+          fetchJSON('/reports/api/cashflow_summary?range=' + range)
+        ]);
+
+        if (!catData.error && Object.keys(catData).length) {
+          Plotly.newPlot('chart-category', [{
+            x:Object.keys(catData),
+            y:Object.values(catData),
+            type:'bar'
+          }], {title:'Spending by Category', margin:{t:40}});
+        }
+
+        if (Array.isArray(trend) && trend.length) {
+          Plotly.newPlot('chart-monthly', [{
+            x:trend.map(r=>r.month),
+            y:trend.map(r=>r.total),
+            type:'scatter', mode:'lines+markers'
+          }], {title:'Monthly Spending Trend', margin:{t:40}});
+        }
+
+        if (Array.isArray(merchants) && merchants.length) {
+          Plotly.newPlot('chart-merchants', [{
+            x:merchants.map(r=>r.amount),
+            y:merchants.map(r=>r.merchant),
+            type:'bar', orientation:'h'
+          }], {title:'Top Merchants', margin:{t:40}});
+        }
+
+        if (Array.isArray(cashflow) && cashflow.length) {
+          Plotly.newPlot('chart-cashflow', [
+            {x:cashflow.map(r=>r.month), y:cashflow.map(r=>r.inflow), name:'Inflow', type:'bar'},
+            {x:cashflow.map(r=>r.month), y:cashflow.map(r=>r.outflow), name:'Outflow', type:'bar'},
+            {x:cashflow.map(r=>r.month), y:cashflow.map(r=>r.running_balance), name:'Running Balance', type:'scatter', mode:'lines+markers', yaxis:'y2'}
+          ], {
+            title:'Cash Flow Summary',
+            barmode:'group',
+            margin:{t:40},
+            yaxis:{title:'Flow'},
+            yaxis2:{overlaying:'y', side:'right', title:'Balance'}
+          });
+        }
+
+        await loadSummaryCards(range);
+        await loadInsights();
+
+        document.getElementById('status').textContent = 'Last updated ' + new Date().toLocaleTimeString();
+      } catch (err) {
+        console.error(err);
+        document.getElementById('status').textContent = 'Error loading data';
+      }
+    }
+
+    // Budget UI
+    async function loadBudget() {
+      const month = (document.getElementById('budget-month').value || '').trim();
+      const qs = month ? ('?month=' + encodeURIComponent(month)) : '';
+      const budget = await fetchJSON('/reports/api/budget' + qs);
+      const bva = await fetchJSON('/reports/api/budget_vs_actual' + (month ? ('?month=' + encodeURIComponent(month)) : ''));
+      document.getElementById('budget-status').textContent = 'Loaded ' + (month || 'default') + ' budget';
+      if (Array.isArray(bva) && bva.length) {
+        Plotly.newPlot('chart-budget', [
+          {x:bva.map(r=>r.category), y:bva.map(r=>r.budget), name:'Budget', type:'bar'},
+          {x:bva.map(r=>r.category), y:bva.map(r=>r.actual), name:'Actual', type:'bar'}
+        ], {title:'Budget vs Actual', barmode:'group', margin:{t:40}});
+      } else {
+        Plotly.purge('chart-budget');
+      }
+    }
+
+    async function saveBudget() {
+      const month = (document.getElementById('budget-month').value || '').trim();
+      const sample = [
+        // Example default; adjust in UI later
+        {category: 'Groceries', amount: 600},
+        {category: 'Dining', amount: 400},
+        {category: 'Utilities', amount: 300},
+        {category: 'Shopping', amount: 300},
+        {category: 'Travel', amount: 200}
+      ];
+      const payload = { month: month || null, items: sample };
+      const res = await fetchJSON('/reports/api/budget', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      document.getElementById('budget-status').textContent =
+        res.status === 'ok' ? 'Budget saved.' : 'Save failed.';
+      await loadBudget();
+    }
+
+    // Forecast chart
+    async function loadForecast() {
+      const fc = await fetchJSON('/reports/api/forecast_cashflow');
+      if (Array.isArray(fc) && fc.length) {
+        Plotly.newPlot('chart-forecast', [
+          {x:fc.map(r=>r.month), y:fc.map(r=>r.inflow), name:'Inflow', type:'bar'},
+          {x:fc.map(r=>r.month), y:fc.map(r=>r.outflow), name:'Outflow', type:'bar'},
+          {x:fc.map(r=>r.month), y:fc.map(r=>r.net), name:'Net', type:'scatter', mode:'lines+markers'}
+        ], {title:'6-Month Forecast (MA)', barmode:'group', margin:{t:40}});
+      } else {
+        Plotly.purge('chart-forecast');
+      }
+    }
+
+    // Paycheck estimator
+    async function calcPaycheck() {
+      const payload = {
+        gross: parseFloat(document.getElementById('pe-gross').value || '0'),
+        pay_periods: parseInt(document.getElementById('pe-periods').value || '26'),
+        federal_rate: parseFloat(document.getElementById('pe-fed').value || '0.18'),
+        state_rate: parseFloat(document.getElementById('pe-state').value || '0.05'),
+        other_deductions: parseFloat(document.getElementById('pe-other').value || '0')
+      };
+      const res = await fetchJSON('/reports/api/paycheck_estimate', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      document.getElementById('pe-out').textContent =
+        'Net per paycheck: $' + res.net_paycheck.toFixed(2) +
+        ' | Annual net: $' + res.annual_net.toFixed(2) +
+        ' | Annual gross: $' + res.annual_gross.toFixed(2) +
+        ' | Effective rate: ' + (res.effective_rate * 100).toFixed(1) + '%';
+    }
+
+    // Insights
+    async function loadInsights() {
+      const res = await fetchJSON('/reports/api/insights/summary');
+      const el = document.getElementById('insights');
+      if (Array.isArray(res) && res.length) {
+        el.innerHTML = res.map(r => (
+          '<div>' + r.message +
+          (r.meta ? ' ' + JSON.stringify(r.meta) : '') +
+          '</div>'
+        )).join('');
+      } else {
+        el.textContent = 'No notable insights right now.';
+      }
+    }
+
+    // Password generator
+    async function genPassword() {
+      const len = document.getElementById('pw-length').value || '16';
+      const special = document.getElementById('pw-special').checked ? 'true' : 'false';
+      const res = await fetchJSON('/reports/api/password_generate?length=' + len + '&special=' + special);
+      document.getElementById('pw-out').textContent = res.password || 'Failed to generate password.';
+    }
+
+    // Orchestration
+    function scheduleAutoRefresh() {
+      if (timer) clearInterval(timer);
+      timer = setInterval(loadCharts, REFRESH_MS);
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadCharts();
+      await loadBudget();
+      await loadForecast();
+      scheduleAutoRefresh();
+      document.getElementById('range').addEventListener('change', loadCharts);
+
+      // Session heartbeat
+      setInterval(async () => {
+        const resp = await fetch('/reports/api/ping');
+        if (resp.status === 401) {
+          window.location.href = '/reports/login?next=' + encodeURIComponent(window.location.pathname);
+        }
+      }, 60000);
+    });
+    </script>
   </body>
 </html>
