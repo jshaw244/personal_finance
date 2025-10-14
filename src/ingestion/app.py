@@ -1,6 +1,10 @@
-from src.common.config import load_env
-from src.common.utils import convert, to_safe_json
-from src.storage.db import init_db, save_item, get_all_items, save_transactions, log_event_db
+"""
+Personal Finance Sandbox App
+- Flask + Plaid integration
+- Local + ngrok access
+- Flask-Login authentication for /reports
+"""
+
 import os, sqlite3, json, time, logging, plaid
 from datetime import date, timedelta
 from flask import Flask, jsonify, request, make_response
@@ -14,15 +18,24 @@ from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchan
 from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
 
-# --- Load environment ---
-ENV_TARGET = os.getenv("ENV_TARGET", "sandbox")
-cfg = load_env(ENV_TARGET)
-
-from src.presentation.reports import reports_bp
+# ------------------------------------------------------------
+#  Internal imports
+# ------------------------------------------------------------
+from src.common.config import load_env
+from src.common.utils import convert, to_safe_json
+from src.storage.db import init_db, save_item, get_all_items, save_transactions, log_event_db
 from src.ingestion.debug_db import analyze_db, vacuum_db
 from src.common.paths import LOG_DIR, DB_FILE
 
-# --- Plaid setup ---
+# ------------------------------------------------------------
+#  Environment / Config
+# ------------------------------------------------------------
+ENV_TARGET = os.getenv("ENV_TARGET", "sandbox")
+cfg = load_env(ENV_TARGET)
+
+# ------------------------------------------------------------
+#  Plaid Client Setup
+# ------------------------------------------------------------
 PLAID_CLIENT_ID = os.getenv("PLAID_CLIENT_ID")
 PLAID_SECRET = os.getenv("PLAID_SECRET")
 PLAID_ENV = (os.getenv("PLAID_ENV") or "sandbox").lower()
@@ -40,34 +53,52 @@ configuration = plaid.Configuration(
 api_client = plaid.ApiClient(configuration)
 client = plaid_api.PlaidApi(api_client)
 
-# --- Flask + Blueprints ---
+# ------------------------------------------------------------
+#  Flask App + Blueprints
+# ------------------------------------------------------------
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # replace in prod
+
+# Use only the reports blueprint (Flask-Login + bcrypt)
+from src.presentation.reports import reports_bp, login_manager, ensure_summary_views_and_tables
+ensure_summary_views_and_tables()
+
+login_manager.init_app(app)
+login_manager.login_view = "reports.login"
+
 app.register_blueprint(reports_bp, url_prefix="/reports")
 
-# --- DB + Logs ---
+# Session timeout
+app.permanent_session_lifetime = timedelta(
+    minutes=int(os.getenv("REPORTS_SESSION_MINUTES", "30"))
+)
+
+# ------------------------------------------------------------
+#  Logging Setup
+# ------------------------------------------------------------
 init_db()
 LOG_DIR.mkdir(exist_ok=True)
 
-# Maintenance log
 MAINTENANCE_LOG = LOG_DIR / "maintenance.log"
 maintenance_logger = logging.getLogger("maintenance")
-maintenance_handler = logging.FileHandler(MAINTENANCE_LOG)
-maintenance_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-maintenance_logger.addHandler(maintenance_handler)
-maintenance_logger.setLevel(logging.INFO)
+if not maintenance_logger.handlers:
+    maintenance_handler = logging.FileHandler(MAINTENANCE_LOG)
+    maintenance_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    maintenance_logger.addHandler(maintenance_handler)
+    maintenance_logger.setLevel(logging.INFO)
+
+APP_LOG = LOG_DIR / "app.log"
+app_logger = logging.getLogger("app")
+if not app_logger.handlers:
+    app_handler = logging.FileHandler(APP_LOG)
+    app_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    app_logger.addHandler(app_handler)
+    app_logger.setLevel(logging.INFO)
 
 def log_maintenance(msg):
     maintenance_logger.info(msg)
     print(msg)
     log_event_db("maintenance", "INFO", msg)
-
-# App log
-APP_LOG = LOG_DIR / "app.log"
-app_logger = logging.getLogger("app")
-app_handler = logging.FileHandler(APP_LOG)
-app_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-app_logger.addHandler(app_handler)
-app_logger.setLevel(logging.INFO)
 
 def log_app(msg, level="info"):
     getattr(app_logger, level)(msg)
@@ -76,19 +107,28 @@ def log_app(msg, level="info"):
 
 log_app(f"App starting: Target={cfg.get('TARGET', ENV_TARGET)}, PLAID_ENV={PLAID_ENV}")
 
-# --- Helpers ---
+# ------------------------------------------------------------
+#  Helper: Record Webhook Event
+# ------------------------------------------------------------
 def save_webhook_event(webhook_type, webhook_code, item_id, payload):
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO webhook_events (received_at, webhook_type, webhook_code, item_id, payload)
         VALUES (datetime('now'), ?, ?, ?, ?)
-    """, (webhook_type, webhook_code, item_id, str(payload)))
-    conn.commit(); conn.close()
+        """,
+        (webhook_type, webhook_code, item_id, str(payload))
+    )
+    conn.commit()
+    conn.close()
 
-# --- 1) Root page ---
+# ------------------------------------------------------------
+#  Routes
+# ------------------------------------------------------------
 @app.route("/")
 def index():
+    """Root page — Plaid Link demo + navigation to Reports."""
     log_app("Serving / (Plaid Link HTML)")
     html = """<!doctype html>
 <html>
@@ -112,6 +152,7 @@ def index():
     <pre id="out"></pre>
 
     <p><a href="/reports">→ View Latest Analysis Reports</a></p>
+    <p><a href="/reports/login">→ Reports Login</a></p>
 
 <script>
 const out=document.getElementById('out');
@@ -150,12 +191,11 @@ txnsBtn.onclick=async()=>{const r=await fetch('/transactions');await log(await r
     resp.headers["Content-Type"] = "text/html"
     return resp
 
-# --- 2) Remaining Plaid endpoints ---
-# (same as your current file; unchanged below this point)
-# ... [keep link_token_create, item_public_token_exchange, accounts, transactions, webhook exactly as-is] ...
-
+# ------------------------------------------------------------
+#  Entrypoint
+# ------------------------------------------------------------
 if __name__ == "__main__":
-    target = os.getenv("ENV_TARGET", "sandbox").lower()
+    target = ENV_TARGET.lower()
     port = 5002 if target == "sandbox" else (5001 if target == "development" else 5000)
     host = "0.0.0.0" if target == "sandbox" else "127.0.0.1"
     app.run(host=host, port=port, debug=(target != "production"))

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Login – Personal Finance Dashboard</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #f8f9fa;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+      }
+      form {
+        background: #fff;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 0 8px rgba(0,0,0,.1);
+        width: 320px;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.5rem;
+        color: #333;
+        text-align: center;
+      }
+      label {
+        display: block;
+        margin-top: 1rem;
+        color: #555;
+      }
+      input[type="text"],
+      input[type="password"] {
+        width: 100%;
+        padding: 0.5rem;
+        margin-top: 0.25rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      .remember {
+        margin-top: 1rem;
+        font-size: 0.9rem;
+        color: #444;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      button {
+        margin-top: 1.5rem;
+        width: 100%;
+        padding: 0.6rem;
+        background: #0078d7;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #005fa3;
+      }
+      .error {
+        color: #b00;
+        text-align: center;
+        margin-top: 1rem;
+        font-size: 0.9rem;
+      }
+      .flash {
+        text-align: center;
+        margin-top: 1rem;
+        font-size: 0.9rem;
+        color: #333;
+      }
+    </style>
+  </head>
+  <body>
+    <form method="post">
+      <h1>🔐 Reports Login</h1>
+
+      <label for="username">Username</label>
+      <input type="text" name="username" id="username" required>
+
+      <label for="password">Password</label>
+      <input type="password" name="password" id="password" required>
+
+      <label class="remember">
+        <input type="checkbox" name="remember"> Stay signed in
+      </label>
+
+      <button type="submit">Login</button>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, msg in messages %}
+            <div class="{{ category }}">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </form>
+  </body>
+</html>

@@ -8,17 +8,23 @@
 import os
 from pathlib import Path
 from typing import Dict, Optional
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 def project_root() -> Path:
     from src.common.paths import PROJECT_ROOT
     return PROJECT_ROOT
 
 def env_file_for(target: str) -> Path:
+    """Return path to environment file for given target."""
     target = (target or "sandbox").lower()
     return project_root() / "config" / "env" / f".env.{target}"
 
 def load_env(target: Optional[str] = None) -> Dict[str, str]:
+    """
+    Load environment variables for the specified target.
+    - Disables interpolation to preserve bcrypt hashes ($2b$...).
+    - Sets consistent defaults and validates required keys.
+    """
     target = (target or "sandbox").lower()
     path = env_file_for(target)
     print(f"DEBUG load_env: target={target}  path={path}")
@@ -26,13 +32,20 @@ def load_env(target: Optional[str] = None) -> Dict[str, str]:
     if not path.exists():
         raise FileNotFoundError(f"Missing env file: {path} (expected for target '{target}')")
 
-    load_dotenv(path, override=True)
+    # --- Disable interpolation so $ in bcrypt hashes is not parsed ---
+    values = dotenv_values(path, interpolate=False)
+    for k, v in values.items():
+        if v is not None:
+            os.environ[k] = v
+
+    # Also load into process env (no interpolation)
+    load_dotenv(path, override=True, interpolate=False)
 
     # --- Inject consistent defaults ---
     os.environ.setdefault("ENV_TARGET", target)
     os.environ.setdefault("LOG_LEVEL", "INFO")
 
-    # --- Optional: choose database path by target ---
+    # --- Choose database path by target ---
     db_default = {
         "sandbox": "data/plaid.db",
         "development": "data/plaid_dev.db",
@@ -60,7 +73,7 @@ def load_env(target: Optional[str] = None) -> Dict[str, str]:
 
     # --- Warn if mismatched target vs .env content ---
     env_target = os.getenv("PLAID_ENV", "").lower()
-    if env_target != target:
+    if env_target and env_target != target:
         print(
             f"Warning: .env file sets PLAID_ENV={env_target!r} "
             f"but you loaded target={target!r}. Check for mismatch."
