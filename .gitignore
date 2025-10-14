@@ -15,3 +15,11 @@ ngrok.exe
 /*.csv
 /*.png
 /*.txt
+
+# Ignore runtime artifacts
+/data/*.db
+/results/*
+/backups/*
+/logs/*
+/archive/*
+.env*
