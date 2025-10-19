@@ -1,4 +1,4 @@
-# Project-scoped launcher (no global profile changes needed)
+﻿# Project-scoped launcher (no global profile changes needed)
 # Usage:
 #   & "C:\DATA\personal_finance\01.connection\plaid\plaid.ps1" sandbox
 #   & "C:\DATA\personal_finance\01.connection\plaid\plaid.ps1" development
@@ -29,4 +29,5 @@ switch ($EnvTarget) {
     "development"  { Start-PlaidDev }
     "production"   { Start-PlaidProd }
 }
+
 

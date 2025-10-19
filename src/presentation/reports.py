@@ -277,8 +277,8 @@ def ensure_summary_views_and_tables():
 
     conn.commit()
     conn.close()
-
-ensure_summary_views_and_tables()
+# ✅ optional alias for backward compatibility
+ensure_summary_views = ensure_summary_views_and_tables
 
 def write_cache(data: dict):
     try:
@@ -465,21 +465,48 @@ def api_cashflow_summary():
 @reports_bp.route("/api/recurring_merchants")
 @login_required
 def api_recurring_merchants():
+    """
+    Identify recurring merchants based on transaction frequency and month coverage.
+    Handles empty datasets gracefully and adds safe defaults for parameters.
+    """
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
-    if df.empty:
-        return jsonify({"error": "no transaction data"}), 404
+
+    # ✅ Defensive guard for missing or empty data
+    if df.empty or "amount" not in df.columns:
+        return jsonify([])
+
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])
-    merchant_col = "merchant_name" if "merchant_name" in df.columns else ("name" if "name" in df.columns else None)
-    if not merchant_col or "amount" not in df.columns:
-        return jsonify({"error": "missing required columns"}), 400
-    min_occ = int(request.args.get("min_occurrences", "3"))
-    min_months = int(request.args.get("min_months", "3"))
-    top_n = int(request.args.get("top", "20"))
+
+    # Merchant column detection
+    merchant_col = "merchant_name" if "merchant_name" in df.columns else (
+        "name" if "name" in df.columns else None
+    )
+    if not merchant_col:
+        return jsonify([])
+
+    # Clean + filter merchants
     df[merchant_col] = df[merchant_col].fillna("").str.strip()
     df = df[df[merchant_col] != ""]
+    if df.empty:
+        return jsonify([])
+
+    #logging
+    current_app.logger.info("Recurring merchant scan: %d txns across %d merchants", len(df), df["merchant_name"].nunique())
+
+    # Parameterized thresholds
+    try:
+        min_occ = int(request.args.get("min_occurrences", "3"))
+        min_months = int(request.args.get("min_months", "3"))
+        top_n = int(request.args.get("top", "20"))
+    except ValueError:
+        min_occ, min_months, top_n = 3, 3, 20
+
+    # Derive month key
     df["month"] = df["date"].dt.to_period("M").astype(str)
+
+    # Aggregate merchant stats
     grp = df.groupby(merchant_col)
     stats = grp.agg(
         total_spend=("amount", "sum"),
@@ -487,17 +514,50 @@ def api_recurring_merchants():
         months=("month", pd.Series.nunique),
         first_seen=("date", "min"),
         last_seen=("date", "max"),
-    ).reset_index(names="merchant")
-    cand = stats[(stats["txns"] >= min_occ) & (stats["months"] >= min_months)].copy()
-    cand = cand.sort_values(["months", "txns", "total_spend"], ascending=[False, False, False])
+    ).reset_index()
+
+    # 🔧 Ensure a consistent column name for merge
+    merchant_col_final = "merchant"
+    if merchant_col in stats.columns:
+        stats = stats.rename(columns={merchant_col: merchant_col_final})
+    elif "index" in stats.columns:
+        stats = stats.rename(columns={"index": merchant_col_final})
+    else:
+        stats.insert(0, merchant_col_final, grp.groups.keys())
+
+    # Filter for recurring merchants
+    cand = stats.loc[(stats["txns"] >= min_occ) & (stats["months"] >= min_months)].copy()
+    if cand.empty:
+        return jsonify([])
+
+    # Optional cadence calculation (avg days between txns)
     def cadence_days(g):
         d = g.sort_values("date")["date"].diff().dropna().dt.days
         return float(d.mean()) if len(d) else None
+
     cad = grp.apply(cadence_days).rename("avg_cadence_days").reset_index()
+
+    # 🔧 Ensure cad has a consistent 'merchant' column
+    if "merchant" not in cad.columns:
+        if "index" in cad.columns:
+            cad = cad.rename(columns={"index": "merchant"})
+        elif "merchant_name" in cad.columns:
+            cad = cad.rename(columns={"merchant_name": "merchant"})
+        elif "name" in cad.columns:
+            cad = cad.rename(columns={"name": "merchant"})
+        else:
+            cad.insert(0, "merchant", list(grp.groups.keys()))
+
     cand = cand.merge(cad, how="left", on="merchant")
+
+
+    # Round + limit output
     cand["total_spend"] = cand["total_spend"].round(2)
+    cand = cand.sort_values(["months", "txns", "total_spend"], ascending=[False, False, False])
     cand = cand.head(top_n)
+
     return jsonify(cand.to_dict(orient="records"))
+
 
 @reports_bp.route("/api/top_transactions")
 @login_required
@@ -764,36 +824,41 @@ def api_daily_allowance():
 @login_required
 def api_paycheck_estimate():
     """
-    POST JSON:
-    {
-      "gross": 3500,
-      "pay_periods": 26,
-      "federal_rate": 0.18,
-      "state_rate": 0.05,
-      "other_deductions": 150
-    }
-    Returns net per paycheck and annualized.
+    Estimate net pay from gross amount, taxes, and deductions.
+    Handles missing or invalid JSON input safely.
     """
-    p = request.get_json(silent=True) or {}
-    gross = float(p.get("gross", 0))
-    pay_periods = int(p.get("pay_periods", 26))
-    fed = float(p.get("federal_rate", 0.18))
-    state = float(p.get("state_rate", 0.05))
-    other = float(p.get("other_deductions", 0.0))
+    payload = request.get_json(silent=True) or {}
 
-    fed_tax = gross * fed
-    state_tax = gross * state
-    net = gross - fed_tax - state_tax - other
+    try:
+        gross = float(payload.get("gross", 0))
+        pay_periods = int(payload.get("pay_periods", 26))
+        federal_rate = float(payload.get("federal_rate", 0.18))
+        state_rate = float(payload.get("state_rate", 0.05))
+        other_deductions = float(payload.get("other_deductions", 0.0))
+    except Exception:
+        return jsonify({"error": "Invalid input format. Expected numeric JSON fields."}), 400
+
+    if gross <= 0 or pay_periods <= 0:
+        return jsonify({"error": "Gross pay and pay periods must be positive."}), 400
+
+    federal_tax = gross * federal_rate
+    state_tax = gross * state_rate
+    net = gross - federal_tax - state_tax - other_deductions
     annual_net = net * pay_periods
     annual_gross = gross * pay_periods
-    effective_rate = 1 - (net / gross) if gross else 0.0
+    effective_rate = round(1 - (net / gross), 3) if gross else 0.0
 
     return jsonify({
+        "gross": round(gross, 2),
         "net_paycheck": round(net, 2),
         "annual_net": round(annual_net, 2),
         "annual_gross": round(annual_gross, 2),
-        "effective_rate": round(effective_rate, 3)
+        "effective_rate": effective_rate,
+        "federal_tax": round(federal_tax, 2),
+        "state_tax": round(state_tax, 2),
+        "other_deductions": round(other_deductions, 2)
     })
+
 
 @reports_bp.route("/api/tax_projection")
 @login_required
@@ -833,28 +898,65 @@ def api_tax_projection():
 @login_required
 def api_insights_summary():
     """
-    Returns a few rule-based insights; placeholder for future AI.
+    Returns lightweight, rule-based financial insights.
+    Automatically handles empty or missing transaction data safely.
     """
-    insights = []
-    # Example: Dining above 30d average in the last week
     df = _load_tx_detail()
-    if not df.empty and "date" in df.columns and "amount" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])
-        df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
-            "payroll|deposit|refund|credit|reversal", case=False, na=False
-        )
-        dining = df[(df["category"] == "Dining") & (~df["is_income"])]
-        last7 = dining[dining["date"] >= (pd.Timestamp.today() - pd.Timedelta(days=7))]["amount"].sum()
-        last30 = dining[dining["date"] >= (pd.Timestamp.today() - pd.Timedelta(days=30))]["amount"].sum()
-        if last30 > 0 and last7 > (last30 / 4):  # naive weekly > 1/4 of last 30 days
+
+    # ✅ Defensive checks: handle missing or empty data cleanly
+    if df.empty or "date" not in df.columns or "amount" not in df.columns:
+        return jsonify([])
+
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+
+    if "category" not in df.columns:
+        return jsonify([])
+
+    # Identify income-like transactions
+    df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
+        "payroll|deposit|refund|credit|reversal", case=False, na=False
+    )
+
+    insights = []
+
+    # --- Example 1: Dining spend last week vs 30-day baseline ---
+    dining = df[(df["category"] == "Dining") & (~df["is_income"])]
+    if not dining.empty:
+        today = pd.Timestamp.today()
+        last7 = dining[dining["date"] >= (today - pd.Timedelta(days=7))]["amount"].sum()
+        last30 = dining[dining["date"] >= (today - pd.Timedelta(days=30))]["amount"].sum()
+        if last30 > 0 and last7 > (last30 / 4):  # >25% of 30-day spend in just 7 days
             insights.append({
                 "level": "info",
-                "message": "Dining spend in the last week is higher than usual.",
-                "meta": {"last7": round(float(last7), 2), "last30": round(float(last30), 2)}
+                "message": "Dining spend in the last week is higher than your 30-day average.",
+                "meta": {
+                    "last_7_days": round(float(last7), 2),
+                    "last_30_days": round(float(last30), 2),
+                    "percent_of_baseline": round((last7 / last30) * 100, 1)
+                }
             })
 
+    # --- Example 2: Detect missing income in the past 30 days ---
+    income_df = df[df["is_income"]]
+    if income_df.empty or income_df["date"].max() < (pd.Timestamp.today() - pd.Timedelta(days=30)):
+        insights.append({
+            "level": "warning",
+            "message": "No recent income transactions detected in the past 30 days."
+        })
+
+    # --- Example 3: Large single transaction alert (> $1,000 outflow) ---
+    big_tx = df[(~df["is_income"]) & (df["amount"].abs() > 1000)]
+    if not big_tx.empty:
+        insights.append({
+            "level": "alert",
+            "message": f"{len(big_tx)} unusually large transaction(s) over $1,000 detected.",
+            "meta": {"examples": big_tx.head(3)[["date", "merchant_name", "amount"]].to_dict(orient="records")}
+        })
+
     return jsonify(insights)
+
 
 # -------------------------------------------------------------------
 # M5: Password generator (utility only; no vault storage)

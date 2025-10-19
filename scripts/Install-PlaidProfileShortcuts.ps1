@@ -1,4 +1,4 @@
-# Installs Plaid convenience functions into your PowerShell profile.
+﻿# Installs Plaid convenience functions into your PowerShell profile.
 $ErrorActionPreference = "Stop"
 
 # Determine the right profile path for the current host (Windows PowerShell vs PowerShell 7)
@@ -29,4 +29,5 @@ if ($profileText -notmatch [regex]::Escape($marker)) {
 }
 
 Write-Host "Close and reopen PowerShell, then run: Start-PlaidSandbox" -ForegroundColor Cyan
+
 

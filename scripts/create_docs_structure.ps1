@@ -5,11 +5,11 @@
   and inspect DB state for full traceability.
 
 .DESCRIPTION
-  • Creates documentation structure (automation, ingestion, analysis, processing, storage)
-  • Logs all actions to logs/maintenance.log
-  • Commits + tags in Git (docs-YYYYMMDD_HHMM)
-  • Runs make_session_snapshot.py → DOCS SUMMARY YAML
-  • Runs inspect_snapshot_db_state.py → DB SUMMARY log
+  - Creates documentation structure (automation, ingestion, analysis, processing, storage)
+  - Logs all actions to logs/maintenance.log
+  - Commits + tags in Git (docs-YYYYMMDD_HHMM)
+  - Runs make_session_snapshot.py -> DOCS SUMMARY YAML
+  - Runs inspect_snapshot_db_state.py -> DB SUMMARY log
 #>
 
 $ErrorActionPreference = "Stop"
@@ -26,7 +26,7 @@ Set-Location $projectRoot
 function Write-Log {
     param ([string]$Message)
     $ts = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    Add-Content -Path $logFile -Value "[$ts] DOCS ACTION — $Message"
+    Add-Content -Path $logFile -Value "[$ts] DOCS ACTION - $Message"
 }
 
 # --- Section Content ---
@@ -60,15 +60,14 @@ $storageDoc = @"
 **Related Code:** `src/storage/db.py`, `src/storage/schema.sql`
 "@
 
-# Combine into hashtable after defining each here-string
-$sections = New-Object 'System.Collections.Generic.Dictionary[string,string]'
-$sections["automation"]  = $automationDoc
-$sections["ingestion"]   = $ingestionDoc
-$sections["analysis"]    = $analysisDoc
-$sections["processing"]  = $processingDoc
-$sections["storage"]     = $storageDoc
-
-
+# --- Sections (use a simple hashtable to avoid parser issues) ---
+$sections = @{
+  automation = $automationDoc
+  ingestion  = $ingestionDoc
+  analysis   = $analysisDoc
+  processing = $processingDoc
+  storage    = $storageDoc
+}
 
 # --- Step 1: Create folder structure ---
 Write-Host "Creating documentation structure under $docsRoot..."
@@ -90,7 +89,7 @@ foreach ($section in $sections.Keys) {
     if (Test-Path $readme) {
         Write-Host "Skipped existing file: $readme"
     } else {
-        $sections[$section] | Out-File -FilePath $readme -Encoding utf8
+        $sections[$section] | Out-File -FilePath $readme -Encoding UTF8
         Write-Host "Created README: $readme"
         Write-Log "Created README for $section"
     }
@@ -113,7 +112,7 @@ if (Test-Path ".git") {
     git commit -m $commitMsg
     if ($LASTEXITCODE -ne 0) {
         Write-Host "No new changes to commit. Skipping tag creation."
-        Write-Log "Skipped Git commit — no changes detected"
+        Write-Log "Skipped Git commit - no changes detected"
     } else {
         $tagName = "docs-$timestamp"
         git tag -a $tagName -m "Documentation update ($timestamp)"
@@ -133,8 +132,8 @@ if (Test-Path ".git") {
         }
     }
 } else {
-    Write-Host "No Git repository detected — skipping commit, tag, and push."
-    Write-Log "Skipped Git commit — no repository detected"
+    Write-Host "No Git repository detected - skipping commit, tag, and push."
+    Write-Log "Skipped Git commit - no repository detected"
 }
 
 # --- Step 3: Append DOCS SUMMARY snapshot via Python ---
@@ -146,11 +145,11 @@ if (Test-Path $makeSnapshot) {
         Write-Log "Generated DOCS SUMMARY snapshot (YAML) via make_session_snapshot.py"
     } catch {
         Write-Host "Warning: could not run make_session_snapshot.py. Error: $_"
-        Write-Log "Failed to run make_session_snapshot.py — $_"
+        Write-Log "Failed to run make_session_snapshot.py - $_"
     }
 } else {
-    Write-Host "make_session_snapshot.py not found — skipping DOCS SUMMARY snapshot."
-    Write-Log "Skipped DOCS SUMMARY snapshot — script not found"
+    Write-Host "make_session_snapshot.py not found - skipping DOCS SUMMARY snapshot."
+    Write-Log "Skipped DOCS SUMMARY snapshot - script not found"
 }
 
 # --- Step 4: Run inspect_snapshot_db_state.py to log DB SUMMARY ---
@@ -162,14 +161,13 @@ if (Test-Path $inspectScript) {
         Write-Log "Executed inspect_snapshot_db_state.py and appended DB SUMMARY"
     } catch {
         Write-Host "Warning: could not run inspect_snapshot_db_state.py. Error: $_"
-        Write-Log "Failed to run inspect_snapshot_db_state.py — $_"
+        Write-Log "Failed to run inspect_snapshot_db_state.py - $_"
     }
 } else {
-    Write-Host "inspect_snapshot_db_state.py not found — skipping DB SUMMARY logging."
-    Write-Log "Skipped DB SUMMARY logging — script not found"
+    Write-Host "inspect_snapshot_db_state.py not found - skipping DB SUMMARY logging."
+    Write-Log "Skipped DB SUMMARY logging - script not found"
 }
 
 # --- Step 5: Finalize ---
 Write-Host "`nDocumentation creation + Git commit + snapshot + DB log complete."
 Write-Log "Documentation creation + Git commit + snapshot + DB log complete"
-

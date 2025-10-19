@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Launches the production environment for the personal_finance project.
 .DESCRIPTION
@@ -98,7 +98,7 @@ if ($conflicts.Count -gt 0) {
     Write-Host "`nClose the above process(es) before starting production." -ForegroundColor Red
     exit 1
 } else {
-    Write-Log "No other environments detected. Ports 5000–5002 are free."
+    Write-Log "No other environments detected. Ports 5000â€“5002 are free."
 }
 
 # --- Step 4: Start schema watcher (read-only) ---
@@ -126,4 +126,5 @@ Write-Log "Flask app launched successfully."
 Write-Log "=== Production environment startup complete ==="
 Write-Host "`nProduction environment ready."
 Write-Host "Close windows or press Ctrl+C in Flask terminal to stop."
+
 

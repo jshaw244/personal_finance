@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Ensures full cleanup of sandbox environment when the main launcher window is closed.
 #>
@@ -29,4 +29,5 @@ while ($true) {
         exit 0
     }
 }
+
 

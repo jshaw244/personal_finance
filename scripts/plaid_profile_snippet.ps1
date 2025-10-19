@@ -1,4 +1,4 @@
-# scripts/plaid_profile_snippet.ps1
+﻿# scripts/plaid_profile_snippet.ps1
 # project root = parent of /scripts
 $projRoot = Split-Path -Parent $PSScriptRoot
 
@@ -16,3 +16,4 @@ function Start-PlaidProd {
     $script = Join-Path $projRoot "scripts\runs\production\run.ps1"
     & $script
 }
+

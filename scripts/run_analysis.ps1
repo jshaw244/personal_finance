@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Run analysis pipeline for a given target environment (sandbox, development, production).
 .DESCRIPTION
@@ -259,3 +259,4 @@ try {
 } catch {
     Write-Host ("Warning: could not write completion log entry: " + $_) -ForegroundColor Yellow
 }
+

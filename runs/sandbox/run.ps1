@@ -1,17 +1,16 @@
-<#
+﻿<#
 .SYNOPSIS
     One-click start for the sandbox environment.
+
 .DESCRIPTION
-    - Creates/activates .venv if missing
-    - Loads sandbox environment variables
-    - Checks for port conflicts (sandbox/dev/prod)
-    - Auto-backs up database and schema
-    - Starts Flask app and ngrok tunnel
-    - Launches schema watcher (active mode)
-    - Launches debug terminal and optional analysis
-    - Logs all actions to app.log and DB log_events
-    - Stops any prior environment before starting
-    - Automatically stops environment on exit
+    • Creates/activates .venv if missing
+    • Loads sandbox environment variables
+    • Checks for port conflicts (sandbox/dev/prod)
+    • Auto-backs up database and schema
+    • Starts Flask app and ngrok tunnel
+    • Launches debug terminal
+    • Optionally runs analysis
+    • Logs all actions to app.log and DB log_events
 #>
 
 param(
@@ -43,12 +42,7 @@ if ($Maintenance) {
     $env:PYTHONPATH = $ProjectRoot
 
     Write-Host "`nMaintenance shell ready. Run scripts safely.`n" -ForegroundColor Green
-    powershell -NoExit -Command {
-        . .\.venv\Scripts\Activate.ps1
-        $env:ENV_TARGET = "sandbox"
-        $env:PYTHONPATH = (Get-Location).Path
-        Write-Host "`nMaintenance shell active.`n" -ForegroundColor Green
-    }
+    Start-Process -FilePath "pwsh" -ArgumentList "-NoExit -Command `"cd '$ProjectRoot'; . .\.venv\Scripts\Activate.ps1; `$env:ENV_TARGET='sandbox'; `$env:PYTHONPATH='$ProjectRoot'`""
     exit 0
 }
 
@@ -58,13 +52,11 @@ if ($Maintenance) {
 $ProjectRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
 Set-Location -Path $ProjectRoot
 
-$logDir        = Join-Path $ProjectRoot "logs"
-$dataDir       = Join-Path $ProjectRoot "data"
-$schemaFile    = Join-Path $ProjectRoot "src\storage\schema.sql"
-$dbFile        = Join-Path $dataDir "plaid.db"
-$backupDir     = Join-Path $ProjectRoot "backups"
-$WatcherScript = Join-Path $ProjectRoot "runs\automation\watch_schema.ps1"
-$StopScript    = Join-Path $ProjectRoot "scripts\stop_environment.ps1"
+$logDir     = Join-Path $ProjectRoot "logs"
+$dataDir    = Join-Path $ProjectRoot "data"
+$schemaFile = Join-Path $ProjectRoot "src\storage\schema.sql"
+$dbFile     = Join-Path $dataDir "plaid.db"
+$backupDir  = Join-Path $ProjectRoot "backups"
 
 Write-Host "Project Root: $ProjectRoot"
 Write-Host "Logs Dir:     $logDir"
@@ -73,12 +65,8 @@ Write-Host "Data Dir:     $dataDir"
 # -----------------------------
 # Stop any running environment first
 # -----------------------------
-if (Test-Path $StopScript) {
-    Write-Host "Ensuring previous sandbox environment is stopped..."
-    & $StopScript -Target sandbox
-} else {
-    Write-Host "Warning: stop_environment.ps1 not found; skipping cleanup." -ForegroundColor Yellow
-}
+Write-Host "Ensuring previous sandbox environment is stopped..."
+Write-Host "No stop script configured (StopScript variable removed). Skipping cleanup." -ForegroundColor Yellow
 
 # -----------------------------
 # Verify Critical Paths
@@ -188,24 +176,6 @@ if (Test-Path $schemaFile) {
 }
 
 # -----------------------------
-# Launch Schema Watcher (active sync)
-# -----------------------------
-if (Test-Path $WatcherScript) {
-    $existingWatcher = Get-Process pwsh -ErrorAction SilentlyContinue | Where-Object {
-        $_.Path -and ($_.Path -like "*watch_schema.ps1*")
-    }
-    if ($existingWatcher) {
-        Write-Host "Schema watcher already running (PID: $($existingWatcher.Id)). Skipping auto-launch."
-    } else {
-        Write-Host "Launching schema watcher (active sync mode)..."
-        $proc = Start-Process pwsh -PassThru -ArgumentList "-NoExit", "-File", "`"$WatcherScript`""
-        Write-Host "Schema watcher launched. PID: $($proc.Id)"
-    }
-} else {
-    Write-Host "Warning: Schema watcher not found at $WatcherScript" -ForegroundColor Yellow
-}
-
-# -----------------------------
 # Launch Flask App + ngrok
 # -----------------------------
 $publicUrl = $null
@@ -213,7 +183,7 @@ if (Get-Command ngrok -ErrorAction SilentlyContinue) {
     $ng = Get-Process ngrok -ErrorAction SilentlyContinue
     if ($ng) { $ng | Stop-Process -Force }
     Write-Host "Starting ngrok tunnel (port 5002)..."
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot'; ngrok http 5002"
+    Start-Process -FilePath "pwsh" -ArgumentList "-NoExit -Command `"cd '$ProjectRoot'; ngrok http 5002`""
     Start-Sleep -Seconds 4
     try {
         $resp = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -UseBasicParsing
@@ -222,7 +192,9 @@ if (Get-Command ngrok -ErrorAction SilentlyContinue) {
             Write-Host "ngrok public URL: $publicUrl"
             $env:PLAID_WEBHOOK_URL = "$publicUrl/plaid/webhook"
         }
-    } catch { Write-Host "Could not fetch ngrok public URL" -ForegroundColor Yellow }
+    } catch {
+        Write-Host "Could not fetch ngrok public URL" -ForegroundColor Yellow
+    }
 } else {
     Write-Host "ngrok not found in PATH. Skipping tunnel."
 }
@@ -237,7 +209,8 @@ $flaskCmd = @"
 `$env:PYTHONPATH = '$ProjectRoot';
 python -m src.ingestion.app
 "@
-Start-Process pwsh -ArgumentList "-NoExit", "-Command", $flaskCmd
+Start-Process -FilePath "pwsh" -ArgumentList "-NoExit -Command `"$flaskCmd`""
+
 Start-Sleep -Seconds 3
 
 # -----------------------------
@@ -255,7 +228,8 @@ Write-Host 'Debug terminal ready.'
 python -m src.ingestion.debug_db schema
 python -m src.ingestion.debug_db logs 20
 "@ | Out-File -FilePath $debugScript -Encoding UTF8 -Force
-Start-Process powershell -ArgumentList @("-NoExit", "-File", $debugScript)
+
+Start-Process -FilePath "pwsh" -ArgumentList "-NoExit -File `"$debugScript`""
 
 # -----------------------------
 # Optional Analysis
@@ -264,42 +238,14 @@ if ($IncludeAnalysis) {
     $runAnalysis = Join-Path $ProjectRoot "scripts\run_analysis.ps1"
     if (Test-Path $runAnalysis) {
         $args = @("-Target", "sandbox", "-Days", $AnalysisDays)
-        if ($AnalysisStart -and $AnalysisEnd) { $args = @("-Target", "sandbox", "-Start", $AnalysisStart, "-End", $AnalysisEnd) }
+        if ($AnalysisStart -and $AnalysisEnd) {
+            $args = @("-Target", "sandbox", "-Start", $AnalysisStart, "-End", $AnalysisEnd)
+        }
         Write-Host "Running analysis..."
-        & powershell -ExecutionPolicy Bypass -File $runAnalysis @args
+        & pwsh -ExecutionPolicy Bypass -File $runAnalysis @args
     } else {
         Write-Host "run_analysis.ps1 not found. Skipping analysis."
     }
 }
 
-# -----------------------------
-# Register exit cleanup handler
-# -----------------------------
-if (Test-Path $StopScript) {
-    Register-EngineEvent PowerShell.Exiting -Action {
-        try {
-            & $using:StopScript -Target sandbox | Out-Null
-        } catch {
-            Write-Host "Error during cleanup: $_"
-        }
-    } | Out-Null
-    Write-Host "Cleanup handler registered. Sandbox will auto-stop on exit." -ForegroundColor DarkGray
-}
-
-# -----------------------------
-# Launch background watchdog
-# -----------------------------
-$watchdogScript = Join-Path $ProjectRoot "scripts\watchdog_cleanup.ps1"
-if (Test-Path $watchdogScript) {
-    Start-Process pwsh -WindowStyle Hidden -ArgumentList "-File", "`"$watchdogScript`"", "-ParentPID", "$PID", "-TargetEnv", "sandbox"
-    Write-Host "Watchdog launched (PID monitor = $PID)" -ForegroundColor DarkGray
-} else {
-    Write-Host "Warning: watchdog_cleanup.ps1 not found; sandbox will not auto-stop if window closed." -ForegroundColor Yellow
-}
-
-# -----------------------------
-# Startup complete
-# -----------------------------
 Write-Host "`nSandbox environment startup complete. Flask and ngrok are running." -ForegroundColor Cyan
-Write-Host "Close Flask/Watcher windows or exit PowerShell to stop automatically." -ForegroundColor DarkGray
-
