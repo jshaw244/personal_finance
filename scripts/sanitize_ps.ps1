@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Cleans PowerShell files of encoding and formatting issues that cause phantom parse errors.
 .DESCRIPTION
@@ -56,4 +56,5 @@ foreach ($file in $files) {
 
 Write-Log "Sanitization complete. Total files: $($files.Count)"
 Write-Host "Sanitization complete. Log written to $LogFile" -ForegroundColor Green
+
 

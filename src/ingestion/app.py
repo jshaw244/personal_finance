@@ -61,17 +61,46 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # replace in p
 
 # Use only the reports blueprint (Flask-Login + bcrypt)
 from src.presentation.reports import reports_bp, login_manager, ensure_summary_views_and_tables
-ensure_summary_views_and_tables()
+
+# One-time initializer flag
+app.config["REPORTS_INIT_DONE"] = False
+
+def _setup_reporting_views_once():
+    if not app.config.get("REPORTS_INIT_DONE"):
+        try:
+            ensure_summary_views_and_tables()
+            log_app("Reporting views/tables ensured.")
+        except Exception as e:
+            log_app(f"Warning during ensure_summary_views_and_tables(): {e}", "warning")
+        finally:
+            app.config["REPORTS_INIT_DONE"] = True
 
 login_manager.init_app(app)
 login_manager.login_view = "reports.login"
-
 app.register_blueprint(reports_bp, url_prefix="/reports")
-
 # Session timeout
 app.permanent_session_lifetime = timedelta(
     minutes=int(os.getenv("REPORTS_SESSION_MINUTES", "30"))
-)
+ )   
+
+
+
+
+#@app.before_first_request
+#def setup_reporting_views():
+#    """Initialize summary views/tables once Flask context is ready."""
+#    try:
+#        #ensure_summary_views_and_tables()
+#        log_app("Reporting views/tables ensured.")
+#    except Exception as e:
+#        log_app(f"Warning during ensure_summary_views_and_tables(): {e}", "warning")
+#
+#login_manager.init_app(app)
+#login_manager.login_view = "reports.login"
+#app.register_blueprint(reports_bp, url_prefix="/reports")
+
+
+#
 
 # ------------------------------------------------------------
 #  Logging Setup

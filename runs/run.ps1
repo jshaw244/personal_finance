@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Unified launcher for sandbox, development, and production environments.
 
@@ -214,4 +214,5 @@ if ($IncludeAnalysis) {
 
 Write-Host "`n=== $Target environment startup complete ===" -ForegroundColor Cyan
 Write-Host "Close Flask/Watcher windows or run stop_environment.ps1 manually to stop." -ForegroundColor DarkGray
+
 

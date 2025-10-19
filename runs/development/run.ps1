@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Launches the development environment for the personal_finance project.
 .DESCRIPTION
@@ -98,7 +98,7 @@ if ($conflicts.Count -gt 0) {
     Write-Host "`nClose the above process(es) before starting development." -ForegroundColor Red
     exit 1
 } else {
-    Write-Log "No other environments detected. Ports 5000–5002 are free."
+    Write-Log "No other environments detected. Ports 5000â€“5002 are free."
 }
 
 # --- Step 4: Start schema watcher in new terminal ---
@@ -126,4 +126,5 @@ Write-Log "Flask app launched successfully."
 Write-Log "=== Development environment startup complete ==="
 Write-Host "`nDevelopment environment ready."
 Write-Host "Use Ctrl+C to stop Flask or close the watcher window when finished."
+
 

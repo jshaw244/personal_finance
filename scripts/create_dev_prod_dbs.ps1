@@ -1,4 +1,4 @@
-# ./scripts/create_dev_prod_dbs.ps1
+﻿# ./scripts/create_dev_prod_dbs.ps1
 <#
 .SYNOPSIS
     Create empty development and production SQLite databases using schema.sql.
@@ -28,13 +28,13 @@ schema = r'''$schema'''
 
 for name in ["plaid_dev.db", "plaid_prod.db"]:
     db_path = root / "data" / name
-    print(f"→ Creating {db_path} ...")
+    print(f"â†’ Creating {db_path} ...")
     conn = sqlite3.connect(db_path)
     conn.executescript(schema)
     conn.commit()
     conn.close()
 
-print("✅ Done.")
+print("âœ… Done.")
 "@ | Out-File -FilePath $tempPy -Encoding UTF8
 
 # Run it
@@ -42,4 +42,5 @@ print("✅ Done.")
 
 # Clean up
 Remove-Item $tempPy -Force
+
 

@@ -1,4 +1,4 @@
-$path = "C:\DATA\personal_finance\scripts\run_analysis.ps1"
+﻿$path = "C:\DATA\personal_finance\scripts\run_analysis.ps1"
 
 # 1) Known-good ASCII-only script (no smart punctuation, no BOM)
 $code = @'
@@ -234,4 +234,5 @@ try {
 # 4) Try executing it (expect normal runtime messages if prerequisites missing, but no syntax error)
 "--- Running script ---"
 powershell -NoProfile -ExecutionPolicy Bypass -File $path
+
 

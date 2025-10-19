@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Synchronize SQLite databases (sandbox, development, production) with schema.sql.
 .DESCRIPTION
@@ -93,4 +93,5 @@ print("Rebuild complete.")
 }
 
 Write-Host "Schema synchronization complete."
+
 

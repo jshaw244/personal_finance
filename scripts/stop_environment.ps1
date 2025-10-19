@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Stops all components (Flask, ngrok, schema watcher, debug) for a given environment.
 #>
@@ -94,4 +94,5 @@ try {
 # -----------------------------
 Write-Host "`nShutdown sequence complete for $Target environment." -ForegroundColor Cyan
 Write-Host "All processes stopped for $Target.`n" -ForegroundColor Green
+
 

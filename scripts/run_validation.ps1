@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Validate the latest session snapshot and display recent validation history.
 
@@ -56,4 +56,5 @@ if (Test-Path $validationLog) {
 }
 
 Write-Host "`nDone."
+
 

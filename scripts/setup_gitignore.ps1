@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Ensures .gitignore contains all necessary patterns for generated files
     and removes any already-tracked result/log/output files from Git safely.
@@ -79,4 +79,5 @@ try {
 }
 
 Write-Host "Done. Future results and logs will be ignored by Git." -ForegroundColor Cyan
+
 

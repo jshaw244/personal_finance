@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Watches src/storage/schema.sql for changes and automatically syncs databases.
 
@@ -48,7 +48,7 @@ $action = {
     param($source, $eventArgs)
     $path = $eventArgs.FullPath
     $time = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    Write-Log "Schema change detected at $time — running incremental migration..."
+    Write-Log "Schema change detected at $time â€” running incremental migration..."
     try {
         & .\.venv\Scripts\python.exe .\scripts\migrate_schema.py | Out-Host
         Write-Log "Migration completed successfully."
@@ -72,4 +72,5 @@ try {
     $watcher.Dispose()
     Write-Log "Watcher stopped."
 }
+
 

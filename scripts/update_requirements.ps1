@@ -1,4 +1,4 @@
-# scripts/update_requirements.ps1
+﻿# scripts/update_requirements.ps1
 <#
 .SYNOPSIS
     Automate environment freezes, session snapshots, commits, tagging, and optional pushing to GitHub.
@@ -6,9 +6,9 @@
 .DESCRIPTION
     Designed for use inside an active virtual environment (.venv).
     Modes:
-      • Default: freeze requirements → snapshot → commit → tag → (optional push)
-      • --no-push: same as default but skip pushing
-      • --tag-only: skip freeze/snapshot/commit and just tag the current commit
+      â€¢ Default: freeze requirements â†’ snapshot â†’ commit â†’ tag â†’ (optional push)
+      â€¢ --no-push: same as default but skip pushing
+      â€¢ --tag-only: skip freeze/snapshot/commit and just tag the current commit
 
 .USAGE
     ./scripts/update_requirements.ps1
@@ -86,7 +86,7 @@ $snapshotFile = "session_snapshot_$timestamp.yaml"
 $snapshotPath = Join-Path $snapshotDir $snapshotFile
 
 if (Test-Path $snapshotScript) {
-    Write-Host "Running $snapshotScript → $snapshotPath ..."
+    Write-Host "Running $snapshotScript â†’ $snapshotPath ..."
     python $snapshotScript $snapshotPath
 } else {
     Write-Host "No make_session_snapshot.py found - skipping snapshot."
@@ -142,4 +142,5 @@ Write-Host "Snapshot file: $snapshotPath"
 Write-Host "Git tag: $tagName"
 Write-Host "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Write-Host "Done."
+
 
