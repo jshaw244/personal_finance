@@ -180,6 +180,19 @@ def get_ngrok_public_url() -> Optional[str]:
         return None
     return None
 
+# ---------------------------------------------------------
+# Utility: safe file locator + relative path converter
+# ---------------------------------------------------------
+def _safe_find(pattern: str, base: Path = PROJECT_ROOT) -> str:
+    """Return the first matching file (recursively) or 'not_found'."""
+    match = next(base.glob(pattern), None)
+    if match:
+        try:
+            return str(match.relative_to(PROJECT_ROOT))
+        except Exception:
+            return str(match)
+    return "not_found"
+
 def build_snapshot() -> Dict[str, Any]:
     now_ct = datetime.now().astimezone()  # local time with tz
     git = get_git_info()
@@ -210,12 +223,12 @@ def build_snapshot() -> Dict[str, Any]:
         },
         "db": db,
         "recent_webhook_events": recent_events,
-        "files_of_interest": {
-            "schema_sql": str(SCHEMA_FILE),
-            "webhooks_py": str(PROJECT_ROOT / "src" / "ingestion" / "webhooks.py"),
-            "run_ps1": str(PROJECT_ROOT / "runs" / "sandbox" / "run.ps1"),
-            "requirements": str(PROJECT_ROOT / "src" / "requirements.txt"),
-            "logs_dir": str(LOGS_DIR),
+         "files_of_interest": {
+            "schema_sql": _safe_find("**/schema.sql"),
+            "webhooks_py": _safe_find("**/webhooks.py"),
+            "run_ps1": _safe_find("**/run.ps1"),
+            "requirements": _safe_find("**/requirements.txt"),
+            "logs_dir": str(LOGS_DIR.relative_to(PROJECT_ROOT) if LOGS_DIR.exists() else "not_found"),
         },
         "next_actions_placeholder": [
             # Fill these in when you start a session, or leave as-is.
