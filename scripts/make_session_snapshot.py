@@ -77,8 +77,8 @@ DB_PATH = _detect_db_path()
 # Timestamped output (e.g. session_snapshot_20251011_1518.yaml)
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M")
 DEFAULT_OUT = LOGS_DIR / f"session_snapshot_{TIMESTAMP}.yaml"
-SCHEMA_FILE = PROJECT_ROOT / "src" / "storage" / "schema.sql"
-WEBHOOK_ENDPOINT_PREFIX = "/plaid"  # how your blueprint is mounted
+SCHEMA_FILE = next(PROJECT_ROOT.glob("**/schema.sql"), None)
+WEBHOOK_ENDPOINT_PREFIX = os.getenv("WEBHOOK_ENDPOINT_PREFIX", "/plaid") # how your blueprint is mounted
 # -------------------------------------------------------
 
 def rotate_snapshots(log_dir: Path, pattern: str = "session_snapshot_*.yaml", keep: int = 10) -> None:
@@ -246,7 +246,7 @@ def build_snapshot() -> Dict[str, Any]:
             "PLAID_ENV": (_read_env("PLAID_ENV") or "sandbox"),
         },
         "web": {
-            "local_url": "http://127.0.0.1:5000",
+            "local_url": f"http://127.0.0.1:{os.getenv('FLASK_RUN_PORT', '5000')}",
             "webhook_endpoint_prefix": WEBHOOK_ENDPOINT_PREFIX,
             "ngrok_public_url": get_ngrok_public_url(),
         },
