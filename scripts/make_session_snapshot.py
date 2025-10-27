@@ -1,3 +1,5 @@
+# .\scripts\make_session_snapshot
+
 #!/usr/bin/env python3
 """
 Generate a lightweight session snapshot for the personal_finance project.

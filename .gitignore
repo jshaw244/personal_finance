@@ -3,7 +3,7 @@ __pycache__/
 backups/
 *.log
 *.db
-.env*
+#.env*
 ngrok.exe
 
 # Ignore runtime output
@@ -22,5 +22,9 @@ ngrok.exe
 /backups/*
 /logs/*
 /archive/*
-.env*
+#.env*
 pandoc-3.8.2-windows-x86_64.msi
+
+# Environment and credentials
+.env*
+config/env/.env*
