@@ -24,6 +24,8 @@ from pathlib import Path
 from datetime import datetime, timedelta, date
 import pandas as pd
 import sqlite3, os, logging, bcrypt, re, json, math, random, string
+import subprocess, sys
+
 
 # -------------------------------------------------------------------
 # Blueprint / paths / logging setup
@@ -220,73 +222,64 @@ def _filter_by_range(df: pd.DataFrame, range_key: str) -> pd.DataFrame:
     return df[df["date"].dt.date >= start]
 
 # -------------------------------------------------------------------
-# E3: SQLite view + cache
+# E3: SQLite views + summary table enforcement (with full logging)
 # -------------------------------------------------------------------
 def ensure_summary_views_and_tables():
+    """Guarantee that all summary tables and views exist at startup."""
+    from src.storage.db import log_event_db  # safe import; avoids circulars
+
+    def log(msg, level="info"):
+        """Write message to both console and maintenance log."""
+        print(msg)
+        try:
+            # File logger
+            with open(LOG_DIR / "maintenance.log", "a", encoding="utf-8") as f:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"[{ts}] [SUMMARY_INIT] {msg}\n")
+            # DB logger
+            log_event_db("summary_init", level.upper(), msg)
+        except Exception:
+            pass
+
     if not DB_PATH.exists():
+        log(f"[WARN] Database not found at {DB_PATH}", "warning")
         return
-    conn = sqlite3.connect(str(DB_PATH))
-    cur = conn.cursor()
 
-    # Monthly summary view
-    cur.execute("""
-        CREATE VIEW IF NOT EXISTS v_monthly_summary AS
-        SELECT 
-            strftime('%Y-%m', date) AS month,
-            category,
-            SUM(amount) AS total_amount,
-            COUNT(*) AS tx_count
-        FROM transactions
-        GROUP BY 1, 2;
-    """)
-
-    # Budgets table (per category, per month optional)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS budgets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT NOT NULL,
-            month TEXT, -- optional 'YYYY-MM' (null means default/monthless)
-            amount REAL NOT NULL,
-            UNIQUE(category, month)
-        );
-    """)
-
-    # Financial health history (already used; keep if present)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS financial_health_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            snapshot_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            score REAL,
-            debt_to_income REAL,
-            savings_rate REAL,
-            spend_variability REAL,
-            notes TEXT
-        );
-    """)
-
-    # Insights log (stub for future AI)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS insights_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            level TEXT,
-            message TEXT,
-            meta TEXT
-        );
-    """)
-
-    conn.commit()
-    conn.close()
-# ✅ optional alias for backward compatibility
-ensure_summary_views = ensure_summary_views_and_tables
-
-def write_cache(data: dict):
+    # 1. Create/refresh built-in SQLite views
     try:
-        RESULTS_DIR.mkdir(exist_ok=True, parents=True)
-        with open(CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        sql_view = """
+CREATE VIEW IF NOT EXISTS v_monthly_summary AS
+SELECT 
+    strftime('%Y-%m', date) AS month,
+    category,
+    SUM(amount) AS total_amount,
+    COUNT(*) AS tx_count
+FROM transactions
+GROUP BY 1, 2;
+"""
+        cur.execute(sql_view)
+        conn.commit()
+        conn.close()
+        log("[OK] v_monthly_summary view ensured.")
     except Exception as e:
-        log_access(f"Cache write failed: {e}")
+        log(f"[ERROR] Failed to create monthly summary view: {e}", "error")
+        return
+
+    # 2. Run the external summary table generator
+    script = PROJECT_ROOT / "scripts" / "generate_summary_tables.py"
+    if script.exists():
+        try:
+            subprocess.run([sys.executable, str(script)], check=True)
+            log(f"[OK] Summary tables refreshed via {script.name}")
+        except subprocess.CalledProcessError as e:
+            log(f"[ERROR] generate_summary_tables.py exited with {e.returncode}: {e}", "error")
+        except Exception as e:
+            log(f"[ERROR] generate_summary_tables.py failed: {e}", "error")
+    else:
+        log(f"[WARN] {script} not found; skipping summary refresh.", "warning")
+
 
 # -------------------------------------------------------------------
 # Protected routes (page)

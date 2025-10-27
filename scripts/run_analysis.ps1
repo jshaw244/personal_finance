@@ -1,6 +1,7 @@
 ﻿<#
 .SYNOPSIS
     Run analysis pipeline for a given target environment (sandbox, development, production).
+
 .DESCRIPTION
     - Uses the active .venv (assumes run.ps1 already activated it)
     - Supports -Days, -Start, and -End for analysis window
@@ -32,18 +33,30 @@ $logsDir        = "$ProjectRoot\logs"
 $archiveDir     = "$ProjectRoot\archive"
 $snapScript     = "$ProjectRoot\scripts\make_session_snapshot.py"
 
-# --- Select correct analysis script based on target ---
+# ======================================================================
+# SELECT CORRECT ANALYSIS SCRIPT BASED ON TARGET
+# ======================================================================
 switch ($Target) {
     "sandbox" {
-        # keep sandbox isolated (test harness)
-        $analysisScript = "$ProjectRoot\scripts\test_sandbox_analysis.py"
+        # Primary: use new unified summary builder
+        $analysisSummary = "$ProjectRoot\src\analysis\analysis_summary.py"
+        $testSandbox     = "$ProjectRoot\scripts\test_sandbox_analysis.py"
+
+        if (Test-Path $analysisSummary) {
+            Write-Host "Using new analysis_summary.py for sandbox pipeline." -ForegroundColor Cyan
+            $analysisScript = $analysisSummary
+        } elseif (Test-Path $testSandbox) {
+            Write-Host "Fallback: using legacy test_sandbox_analysis.py" -ForegroundColor Yellow
+            $analysisScript = $testSandbox
+        } else {
+            Write-Host "Error: No sandbox analysis script found." -ForegroundColor Red
+            exit 1
+        }
     }
     "development" {
-        # main dev pipeline uses real analysis engine
         $analysisScript = "$ProjectRoot\src\analysis\analysis.py"
     }
     "production" {
-        # prod uses same engine, but different env/.db
         $analysisScript = "$ProjectRoot\src\analysis\analysis.py"
     }
     default {
@@ -96,7 +109,9 @@ try {
     Write-Host "Warning: Unable to validate database consistency: $_" -ForegroundColor Yellow
 }
 
-# --- Helpers ---
+# ======================================================================
+# LOGGING HELPERS
+# ======================================================================
 function Write-Log {
     param([string]$Message)
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -143,18 +158,21 @@ function Cleanup-OldArchives {
     } catch { Write-Log "Warning: failed to delete some old archives - $_" }
 }
 
-# --- Step 1: Verify prerequisites ---
+# ======================================================================
+# STEP 1: Verify prerequisites
+# ======================================================================
 if (-not (Test-Path $analysisScript)) {
     Write-Host "Error: $analysisScript not found." -ForegroundColor Red
     exit 1
 }
-# Use the resolved dbPath from above for the existence check
 if (-not (Test-Path $dbPath)) {
     Write-Host "Error: Database not found at $dbPath." -ForegroundColor Red
     exit 1
 }
 
-# --- Step 2: Run analysis ---
+# ======================================================================
+# STEP 2: Run analysis
+# ======================================================================
 Write-Host ""
 Write-Host ("Running " + $Target + " analysis pipeline...") -ForegroundColor Cyan
 
@@ -172,7 +190,9 @@ try {
     exit 1
 }
 
-# --- Step 3: Generate session snapshot ---
+# ======================================================================
+# STEP 3: Generate session snapshot
+# ======================================================================
 Write-Host ""
 Write-Host "Creating session snapshot..." -ForegroundColor Cyan
 if (Test-Path $snapScript) {
@@ -182,7 +202,9 @@ if (Test-Path $snapScript) {
     } catch { Write-Log "Session snapshot failed: $_" }
 } else { Write-Log "No make_session_snapshot.py found - skipping snapshot." }
 
-# --- Step 4: Git commit + tag + optional push ---
+# ======================================================================
+# STEP 4: Git commit + tag + optional push
+# ======================================================================
 if (Test-Path ".git") {
     git add results logs
     $commitMsg = "Automated $Target analysis + snapshot ($timestamp)"
@@ -202,7 +224,9 @@ if (Test-Path ".git") {
     } else { Write-Log "No new changes detected - skipping tag." }
 } else { Write-Log "No Git repository found - skipping commit/tag." }
 
-# --- Step 5: Rotate, compress, and clean archives ---
+# ======================================================================
+# STEP 5: Rotate, compress, and clean archives
+# ======================================================================
 Write-Host ""
 Write-Host "Maintaining old results and archives..." -ForegroundColor Cyan
 try {
@@ -219,7 +243,9 @@ try {
     Write-Log "Archive maintenance failed: $_"
 }
 
-# --- Step 6: Show quick summary (from latest CSV) ---
+# ======================================================================
+# STEP 6: Show quick summary preview
+# ======================================================================
 try {
     $latestCsv = Get-ChildItem -Path $resultsDir -Filter "${Target}_table_summary_*.csv" |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -236,7 +262,9 @@ try {
     Write-Log "Error showing CSV summary: $_"
 }
 
-# --- Step 7: Open latest Excel output ---
+# ======================================================================
+# STEP 7: Open latest Excel output
+# ======================================================================
 try {
     $latestExcel = Get-ChildItem -Path $resultsDir -Filter "${Target}_analysis_summary_*.xlsx" |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -259,4 +287,3 @@ try {
 } catch {
     Write-Host ("Warning: could not write completion log entry: " + $_) -ForegroundColor Yellow
 }
-

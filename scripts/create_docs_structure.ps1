@@ -1,16 +1,21 @@
+# .\scripts\create_doc_structure.ps1
 <#
 .SYNOPSIS
   Create /docs structure, populate README.md stubs,
-  log actions, commit to Git, run make_session_snapshot.py,
+  log actions, commit all changes to Git, run make_session_snapshot.py,
   and inspect DB state for full traceability.
 
 .DESCRIPTION
-  - Creates documentation structure (automation, ingestion, analysis, processing, storage)
-  - Logs all actions to logs/maintenance.log
-  - Commits + tags in Git (docs-YYYYMMDD_HHMM)
-  - Runs make_session_snapshot.py -> DOCS SUMMARY YAML
-  - Runs inspect_snapshot_db_state.py -> DB SUMMARY log
+  • Creates documentation structure (automation, ingestion, analysis, processing, storage)
+  • Logs all actions to logs/maintenance.log
+  • Commits ALL modified/untracked files (not just docs)
+  • Runs make_session_snapshot.py → DOCS SUMMARY YAML
+  • Runs inspect_snapshot_db_state.py → DB SUMMARY log
 #>
+
+param(
+    [string]$CommitMessage = ""
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -26,47 +31,36 @@ Set-Location $projectRoot
 function Write-Log {
     param ([string]$Message)
     $ts = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    Add-Content -Path $logFile -Value "[$ts] DOCS ACTION - $Message"
+    Add-Content -Path $logFile -Value "[$ts] DOCS ACTION — $Message"
 }
 
 # --- Section Content ---
-$automationDoc = @"
+$sections = @{
+    "automation" = @"
 # Automation Module — PowerShell + Workflow Orchestration
 **Path:** `/docs/automation`  
 **Related Code:** `scripts/update_requirements.ps1`, `runs/sandbox/run.ps1`
 "@
-
-$ingestionDoc = @"
+    "ingestion" = @"
 # Ingestion Module — Plaid Webhook & Data Sync
 **Path:** `/docs/ingestion`  
 **Related Code:** `src/ingestion/webhooks.py`, `scripts/trigger_webhook.py`
 "@
-
-$analysisDoc = @"
+    "analysis" = @"
 # Analysis Module — Data Exploration and Insight
 **Path:** `/docs/analysis`  
 **Related Code:** `src/analysis/analysis.py`, `scripts/explore_transactions.py`
 "@
-
-$processingDoc = @"
+    "processing" = @"
 # Processing Module — Data Transformation and Cleaning
 **Path:** `/docs/processing`  
 **Related Code:** `src/processing/` (planned)
 "@
-
-$storageDoc = @"
+    "storage" = @"
 # Storage Module — Database Design and Schema Management
 **Path:** `/docs/storage`  
 **Related Code:** `src/storage/db.py`, `src/storage/schema.sql`
 "@
-
-# --- Sections (use a simple hashtable to avoid parser issues) ---
-$sections = @{
-  automation = $automationDoc
-  ingestion  = $ingestionDoc
-  analysis   = $analysisDoc
-  processing = $processingDoc
-  storage    = $storageDoc
 }
 
 # --- Step 1: Create folder structure ---
@@ -86,12 +80,12 @@ foreach ($section in $sections.Keys) {
         Write-Log "Created docs folder: $section"
     }
 
-    if (Test-Path $readme) {
-        Write-Host "Skipped existing file: $readme"
-    } else {
-        $sections[$section] | Out-File -FilePath $readme -Encoding UTF8
+    if (!(Test-Path $readme)) {
+        $sections[$section] | Out-File -FilePath $readme -Encoding utf8
         Write-Host "Created README: $readme"
         Write-Log "Created README for $section"
+    } else {
+        Write-Host "Skipped existing file: $readme"
     }
 }
 
@@ -100,19 +94,19 @@ Write-Log "Documentation structure setup complete"
 
 # --- Step 2: Commit + Tag in Git ---
 if (Test-Path ".git") {
-    Write-Host "`nStaging new documentation files..."
-    git add docs logs/maintenance.log
+    Write-Host "`nStaging all modified/untracked files for commit..."
+    git add -A
 
-    $defaultMsg = "Add or update documentation stubs ($timestamp)"
-    $commitMsg = Read-Host "Enter commit message [$defaultMsg]"
-    if ([string]::IsNullOrWhiteSpace($commitMsg)) {
-        $commitMsg = $defaultMsg
+    if ([string]::IsNullOrWhiteSpace($CommitMessage)) {
+        $defaultMsg = "Auto documentation + system snapshot update ($timestamp)"
+        $CommitMessage = Read-Host "Enter commit message [$defaultMsg]"
+        if ([string]::IsNullOrWhiteSpace($CommitMessage)) { $CommitMessage = $defaultMsg }
     }
 
-    git commit -m $commitMsg
+    git commit -m $CommitMessage
     if ($LASTEXITCODE -ne 0) {
         Write-Host "No new changes to commit. Skipping tag creation."
-        Write-Log "Skipped Git commit - no changes detected"
+        Write-Log "Skipped Git commit — no changes detected"
     } else {
         $tagName = "docs-$timestamp"
         git tag -a $tagName -m "Documentation update ($timestamp)"
@@ -132,8 +126,8 @@ if (Test-Path ".git") {
         }
     }
 } else {
-    Write-Host "No Git repository detected - skipping commit, tag, and push."
-    Write-Log "Skipped Git commit - no repository detected"
+    Write-Host "No Git repository detected — skipping commit, tag, and push."
+    Write-Log "Skipped Git commit — no repository detected"
 }
 
 # --- Step 3: Append DOCS SUMMARY snapshot via Python ---
@@ -145,11 +139,11 @@ if (Test-Path $makeSnapshot) {
         Write-Log "Generated DOCS SUMMARY snapshot (YAML) via make_session_snapshot.py"
     } catch {
         Write-Host "Warning: could not run make_session_snapshot.py. Error: $_"
-        Write-Log "Failed to run make_session_snapshot.py - $_"
+        Write-Log "Failed to run make_session_snapshot.py — $_"
     }
 } else {
-    Write-Host "make_session_snapshot.py not found - skipping DOCS SUMMARY snapshot."
-    Write-Log "Skipped DOCS SUMMARY snapshot - script not found"
+    Write-Host "make_session_snapshot.py not found — skipping DOCS SUMMARY snapshot."
+    Write-Log "Skipped DOCS SUMMARY snapshot — script not found"
 }
 
 # --- Step 4: Run inspect_snapshot_db_state.py to log DB SUMMARY ---
@@ -161,13 +155,13 @@ if (Test-Path $inspectScript) {
         Write-Log "Executed inspect_snapshot_db_state.py and appended DB SUMMARY"
     } catch {
         Write-Host "Warning: could not run inspect_snapshot_db_state.py. Error: $_"
-        Write-Log "Failed to run inspect_snapshot_db_state.py - $_"
+        Write-Log "Failed to run inspect_snapshot_db_state.py — $_"
     }
 } else {
-    Write-Host "inspect_snapshot_db_state.py not found - skipping DB SUMMARY logging."
-    Write-Log "Skipped DB SUMMARY logging - script not found"
+    Write-Host "inspect_snapshot_db_state.py not found — skipping DB SUMMARY logging."
+    Write-Log "Skipped DB SUMMARY logging — script not found"
 }
 
 # --- Step 5: Finalize ---
-Write-Host "`nDocumentation creation + Git commit + snapshot + DB log complete."
-Write-Log "Documentation creation + Git commit + snapshot + DB log complete"
+Write-Host "`nDocumentation creation + full Git commit + snapshot + DB log complete."
+Write-Log "Documentation creation + full Git commit + snapshot + DB log complete"

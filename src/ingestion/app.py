@@ -61,6 +61,7 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # replace in p
 
 # Use only the reports blueprint (Flask-Login + bcrypt)
 from src.presentation.reports import reports_bp, login_manager, ensure_summary_views_and_tables
+ensure_summary_views_and_tables()
 
 # One-time initializer flag
 app.config["REPORTS_INIT_DONE"] = False
