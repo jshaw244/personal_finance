@@ -41,16 +41,45 @@ def detect_session_source():
             return Path(arg).name
     return "manual_or_unknown"
 
-# ---- Config (edit if your layout changes) ----
+# ---- Config (auto-detect environment and DB path) ----
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = PROJECT_ROOT / "data" / "plaid.db"
 LOGS_DIR = PROJECT_ROOT / "logs"
+
+# Detect current environment (from ENV_TARGET or PLAID_ENV)
+ENV_TARGET = (os.getenv("ENV_TARGET") or os.getenv("PLAID_ENV") or "sandbox").lower()
+
+# Mapping from environment to database filename
+DB_FILES = {
+    "sandbox": "plaid.db",
+    "development": "plaid_dev.db",
+    "production": "plaid_prod.db",
+}
+
+def _detect_db_path() -> Path:
+    """Return the correct DB path based on environment or existing files."""
+    # 1. Environment-driven
+    env_file = DB_FILES.get(ENV_TARGET)
+    candidate = PROJECT_ROOT / "data" / env_file if env_file else None
+    if candidate and candidate.exists():
+        return candidate
+
+    # 2. Fallback: first matching file that exists
+    for name in DB_FILES.values():
+        path = PROJECT_ROOT / "data" / name
+        if path.exists():
+            return path
+
+    # 3. Last resort: default sandbox DB
+    return PROJECT_ROOT / "data" / "plaid.db"
+
+DB_PATH = _detect_db_path()
+
 # Timestamped output (e.g. session_snapshot_20251011_1518.yaml)
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M")
 DEFAULT_OUT = LOGS_DIR / f"session_snapshot_{TIMESTAMP}.yaml"
 SCHEMA_FILE = PROJECT_ROOT / "src" / "storage" / "schema.sql"
 WEBHOOK_ENDPOINT_PREFIX = "/plaid"  # how your blueprint is mounted
-# ---------------------------------------------
+# -------------------------------------------------------
 
 def rotate_snapshots(log_dir: Path, pattern: str = "session_snapshot_*.yaml", keep: int = 10) -> None:
     """Keep only the most recent <keep> YAML snapshots."""
