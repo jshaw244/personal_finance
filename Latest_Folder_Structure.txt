@@ -10,39 +10,49 @@ C:.
 │       archive_20251011_2138.zip
 │       archive_20251011_2143.zip
 │       archive_20251012_1010.zip
+│       archive_20251012_1048.zip
+│       archive_20251012_1715.zip
+│       archive_20251012_1753.zip
+│       archive_20251019_1110.zip
+│       sandbox_db_snapshot_20251018_2311.zip
+│       sandbox_db_snapshot_20251018_2311.zip.sha256
 │
 ├───backups
-│       plaid_20251011_1232.db
-│       plaid_20251011_1758.db
-│       plaid_20251011_1814.db
-│       plaid_20251011_1839.db
-│       plaid_20251011_1942.db
-│       plaid_20251011_2010.db
-│       plaid_20251011_2022.db
-│       plaid_20251011_2025.db
-│       plaid_20251011_2036.db
-│       plaid_20251011_2127.db
-│       schema_20251005_2208.sql
-│       schema_20251005_2216.sql
-│       schema_20251005_2221.sql
-│       schema_20251009_1916.sql
-│       schema_20251009_2306.sql
-│       schema_20251010_2022.sql
-│       schema_20251010_2024.sql
-│       schema_20251010_2240.sql
-│       schema_20251011_1758.sql
-│       schema_20251011_1814.sql
+│       development_plaid_20251019_1450.db
+│       plaid_20251019_1138.db
+│       plaid_20251019_1223.db
+│       plaid_20251019_1457.db
+│       plaid_20251019_1516.db
+│       plaid_20251019_1519.db
+│       plaid_20251019_2014.db
+│       plaid_20251019_2109.db
+│       plaid_20251019_2232.db
+│       plaid_20251019_2249.db
+│       plaid_20251026_2229.db
+│       schema_20251012_1656.sql
+│       schema_20251012_1657.sql
+│       schema_20251012_1703.sql
+│       schema_20251012_1728.sql
+│       schema_20251012_1730.sql
+│       schema_20251012_1734.sql
+│       schema_20251012_1753.sql
+│       schema_20251012_2215.sql
+│       schema_20251012_2233.sql
+│       schema_20251013_1248.sql
 │
 ├───config
 │   └───env
 │           .env.development
 │           .env.production
 │           .env.sandbox
+│           .env.sandbox.bak
 │           .gitkeep
 │
 ├───data
 │   │   .gitkeep
 │   │   plaid.db
+│   │   plaid_dev.db
+│   │   plaid_prod.db
 │   │
 │   ├───processed
 │   │       .gitkeep
@@ -54,6 +64,7 @@ C:.
 │   │   New Text Document.txt
 │   │   README.md
 │   │   README_auto_log.md
+│   │   sandbox_lifecycle_guide.md
 │   │
 │   ├───analysis
 │   │       README.md
@@ -74,37 +85,51 @@ C:.
 ├───logs
 │       .gitkeep
 │       app.log
+│       db_snapshot_sanitizer.log
 │       maintenance.log
+│       sanitizer.log
+│       schema_watcher.log
 │       session_snapshot.yaml
-│       session_snapshot_20251010_201655.yaml
-│       session_snapshot_20251011_2003.yaml
-│       session_snapshot_20251011_2138.yaml
-│       session_snapshot_20251011_2143.yaml
-│       session_snapshot_20251012_1010.yaml
+│       session_snapshot_20251012_2251.yaml
+│       session_snapshot_20251013_1920.yaml
+│       session_snapshot_20251013_1934.yaml
+│       session_snapshot_20251018_1708.yaml
+│       session_snapshot_20251019_1110.yaml
+│       session_snapshot_20251026_2155.yaml
+│       session_snapshot_20251026_2220.yaml
+│       session_snapshot_20251026_2231.yaml
+│       session_snapshot_20251026_2243.yaml
 │       webhook.log
+│
+├───maintenance
+│       sandbox_baseline_20251018.ps1
 │
 ├───notebooks
 │       .gitkeep
 │
 ├───results
+│   │   qa_snapshot_20251019_2156.xlsx
+│   │   qa_snapshot_20251019_2233.xlsx
+│   │   qa_snapshot_20251019_2236.xlsx
 │   │   sandbox_analysis_summary_20251010_2248.txt
 │   │   sandbox_analysis_summary_20251010_2306.txt
 │   │   sandbox_analysis_summary_20251010_2315.txt
-│   │   sandbox_analysis_summary_20251010_2340.xlsx
 │   │   sandbox_analysis_summary_20251011_1843.txt
-│   │   sandbox_analysis_summary_20251011_1916.xlsx
-│   │   sandbox_analysis_summary_20251011_2006.xlsx
-│   │   sandbox_analysis_summary_20251011_2138.xlsx
-│   │   sandbox_analysis_summary_20251011_2143.xlsx
+│   │   sandbox_analysis_summary_20251012_1715.xlsx
+│   │   sandbox_analysis_summary_20251012_1753.xlsx
+│   │   sandbox_analysis_summary_20251019_1101.xlsx
+│   │   sandbox_analysis_summary_20251019_1110.xlsx
 │   │   sandbox_by_category.png
 │   │   sandbox_cumulative_trend.png
+│   │   sandbox_dashboard_cache.json
+│   │   sandbox_db_snapshot_20251018_2311.xlsx
 │   │   sandbox_monthly_trend.png
 │   │   sandbox_monthly_trend_20251011_1843.csv
 │   │   sandbox_spending_trend.png
-│   │   sandbox_table_summary_20251011_1916.csv
-│   │   sandbox_table_summary_20251011_2006.csv
 │   │   sandbox_table_summary_20251011_2138.csv
 │   │   sandbox_table_summary_20251011_2143.csv
+│   │   sandbox_table_summary_20251012_1715.csv
+│   │   sandbox_table_summary_20251012_1753.csv
 │   │   sandbox_top_merchants.png
 │   │
 │   └───images
@@ -114,45 +139,58 @@ C:.
 │           sandbox_top_merchants.png
 │
 ├───runs
-│   │   plaid.ps1
-│   │
-│   ├───development
-│   ├───production
-│   └───sandbox
-│           run.ps1
+│       run.ps1
 │
 ├───scripts
-│       check_webhooks.py
-│       check_webhook_events.py
-│       count_transactions.py
-│       create_docs_structure.ps1
-│       explore_transactions.py
-│       fix_run_analysis.ps1
-│       inspect_db.py
-│       inspect_snapshot_db_state.py
-│       Install-PlaidProfileShortcuts.ps1
-│       list_items.py
-│       list_webhook_events.py
-│       load-env.ps1
-│       make_session_snapshot.py
-│       migrate_add_sync_cursor.py
-│       migrate_items_table.py
-│       plaid_profile_snippet.ps1
-│       readme.txt
-│       run_analysis.ps1
-│       run_validation.ps1
-│       sanitize_ps.ps1
-│       seed_transactions.py
-│       setup_gitignore.ps1
-│       show_recent_transactions.py
-│       test_sandbox_analysis.py
-│       test_webhook.py
-│       trigger_webhook.py
-│       update_requirements.ps1
-│       update_webhook_urls.py
-│       validate_snapshot_schema.py
-│       validate_snapshot_schema.txt
-│       verify_db_objects.py
+│   │   check_webhooks.py
+│   │   check_webhook_events.py
+│   │   compare_db_snapshots.ps1
+│   │   compare_db_snapshots.py
+│   │   count_transactions.py
+│   │   create_dev_prod_dbs.ps1
+│   │   create_docs_structure.ps1
+│   │   explore_transactions.py
+│   │   export_db_snapshot.ps1
+│   │   export_db_snapshot.py
+│   │   fix_run_analysis.ps1
+│   │   generate_password_hash.py
+│   │   generate_qa_snapshot.py
+│   │   generate_summary_tables.py
+│   │   inspect_db.py
+│   │   inspect_snapshot_db_state.py
+│   │   Install-PlaidProfileShortcuts.ps1
+│   │   list_items.py
+│   │   list_webhook_events.py
+│   │   load-env.ps1
+│   │   make_session_snapshot.py
+│   │   migrate_add_sync_cursor.py
+│   │   migrate_items_table.py
+│   │   migrate_schema.py
+│   │   readme.txt
+│   │   reset.ps1
+│   │   reset_personal_finance_app.ps1
+│   │   run_analysis.ps1
+│   │   run_validation.ps1
+│   │   sanitize_ps.ps1
+│   │   seed_transactions.py
+│   │   setup_gitignore.ps1
+│   │   show_recent_transactions.py
+│   │   sync_schemas.ps1
+│   │   test_reports_api.ps1
+│   │   test_sandbox_analysis.py
+│   │   test_webhook.py
+│   │   trigger_webhook.py
+│   │   update_requirements.ps1
+│   │   update_webhook_urls.py
+│   │   validate_snapshot_schema.py
+│   │   validate_snapshot_schema.txt
+│   │   verify_active_db.ps1
+│   │   verify_db_objects.py
+│   │   watchdog_cleanup.ps1
+│   │
+│   └───old
+│           plaid_profile_snippet.ps1
+│           stop_environment.ps1
 │
 ├───src
 │   │   requirements.txt
@@ -160,9 +198,11 @@ C:.
 │   │
 │   ├───analysis
 │   │   │   analysis.py
+│   │   │   analysis_summary.py
 │   │   │
 │   │   └───__pycache__
 │   │           analysis.cpython-313.pyc
+│   │           analysis_summary.cpython-313.pyc
 │   │
 │   ├───common
 │   │   │   config.py
@@ -189,6 +229,16 @@ C:.
 │   │           __init__.cpython-313.pyc
 │   │
 │   ├───presentation
+│   │   │   reports.py
+│   │   │
+│   │   ├───templates
+│   │   │       login.html
+│   │   │       reports_index.html
+│   │   │
+│   │   └───__pycache__
+│   │           auth.cpython-313.pyc
+│   │           reports.cpython-313.pyc
+│   │
 │   ├───processing
 │   ├───storage
 │   │   │   db.py
