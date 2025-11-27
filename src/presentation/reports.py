@@ -211,13 +211,20 @@ def _load_tx_detail() -> pd.DataFrame:
     if "category" not in df.columns:
         df["category"] = None
     df["category"] = df["category"].fillna("").replace("", None)
+    df["category"] = df["category"].replace(["None", "none"], None)
+
     df["category"] = df.apply(
-        lambda r: _derive_category(r.get("name", ""), r.get("merchant_name", "")) if not r.get("category") else r.get("category"),
-        axis=1
+        lambda r: _derive_category(
+            r.get("name", ""), 
+            r.get("merchant_name", "")
+        ) if not r.get("category") else r.get("category"),
+        axis=1,
     )
 
     if "amount" in df.columns:
-        df["spending_type"] = df["amount"].apply(lambda x: "income" if x < 0 else "expense")
+        df["spending_type"] = df["amount"].apply(
+            lambda x: "income" if x > 0 else "expense"
+        )
     else:
         df["spending_type"] = "unknown"
     return df
@@ -351,7 +358,24 @@ def api_spending_by_category():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
     if df.empty or "category" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
-    by_cat = df.groupby("category", dropna=False)["amount"].sum().sort_values(ascending=False).round(2)
+
+    df = df.copy()
+    df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
+        "payroll|deposit|refund|credit|reversal", case=False, na=False
+    )
+
+    # Expenses only, as positive "spend"
+    spend_df = df.loc[~df["is_income"]].copy()
+    spend_df["spend"] = spend_df["amount"].abs()
+
+    by_cat = (
+        spend_df
+        .groupby("category", dropna=False)["spend"]
+        .sum()
+        .sort_values(ascending=False)
+        .round(2)
+    )
+
     return jsonify(by_cat.to_dict())
 
 @reports_bp.route("/api/monthly_trend")
@@ -360,10 +384,30 @@ def api_monthly_trend():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
     if df.empty or "date" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
-    df["date"] = pd.to_datetime(df["date"], errors="coerce").dropna()
-    df["month"] = df["date"].dt.to_period("M").astype(str)
-    trend = df.groupby("month")["amount"].sum().reset_index().sort_values("month").round(2)
+
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+
+    df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
+        "payroll|deposit|refund|credit|reversal", case=False, na=False
+    )
+
+    # Expenses only, as positive spend
+    spend_df = df.loc[~df["is_income"]].copy()
+    spend_df["spend"] = spend_df["amount"].abs()
+    spend_df["month"] = spend_df["date"].dt.to_period("M").astype(str)
+
+    trend = (
+        spend_df
+        .groupby("month")["spend"]
+        .sum()
+        .reset_index()
+        .sort_values("month")
+        .round(2)
+    )
     trend.columns = ["month", "total"]
+
     return jsonify(trend.to_dict(orient="records"))
 
 @reports_bp.route("/api/top_merchants")
@@ -388,24 +432,37 @@ def api_kpi_summary():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
     if df.empty or "amount" not in df.columns or "date" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
-    df["date"] = pd.to_datetime(df["date"], errors="coerce").dropna()
+
+    # Parse dates safely and drop rows with invalid dates
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df[df["date"].notna()]
+
     df = df[df["amount"].notna()]
     df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
-        "payroll|deposit|refund|credit|reversal", case=False, na=False)
-    spend_df = df.loc[~df["is_income"]]
-    total_spent = spend_df["amount"].sum()
-    avg_txn = spend_df["amount"].mean()
+        "payroll|deposit|refund|credit|reversal", case=False, na=False
+    )
+
+    # Treat spending as positive
+    spend_df = df.loc[~df["is_income"]].copy()
+    spend_df["spend"] = spend_df["amount"].abs()
+
+    total_spent = spend_df["spend"].sum()
+    avg_txn = spend_df["spend"].mean()
+
     spend_df["month"] = spend_df["date"].dt.to_period("M").astype(str)
-    monthly = spend_df.groupby("month")["amount"].sum().sort_index()
+    monthly = spend_df.groupby("month")["spend"].sum().sort_index()
+
     mom_pct = 0.0
     if len(monthly) >= 2:
         last, prev = monthly.iloc[-1], monthly.iloc[-2]
         mom_pct = ((last - prev) / prev * 100) if prev else 0.0
+
     spend_df["year"] = spend_df["date"].dt.year
     current_year = spend_df["year"].max()
-    ytd_sum = spend_df.loc[spend_df["year"] == current_year, "amount"].sum()
-    prior_sum = spend_df.loc[spend_df["year"] == current_year - 1, "amount"].sum()
+    ytd_sum = spend_df.loc[spend_df["year"] == current_year, "spend"].sum()
+    prior_sum = spend_df.loc[spend_df["year"] == current_year - 1, "spend"].sum()
     ytd_pct = ((ytd_sum - prior_sum) / prior_sum * 100) if prior_sum else 0.0
+
     result = {
         "total_spent": round(total_spent, 2),
         "avg_txn": round(avg_txn, 2),
@@ -416,18 +473,29 @@ def api_kpi_summary():
     write_cache(result)
     return jsonify(result)
 
+
 @reports_bp.route("/api/income_expense_split")
 @login_required
 def api_income_expense_split():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
     if df.empty or "amount" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
+
+    df = df.copy()
     df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
-        "payroll|deposit|refund|credit|reversal", case=False, na=False)
-    inflow = df.loc[df["is_income"], "amount"].sum()
-    outflow = df.loc[~df["is_income"], "amount"].sum()
-    net = inflow - outflow
-    result = {"income": round(inflow, 2), "expenses": round(outflow, 2), "net_balance": round(net, 2)}
+        "payroll|deposit|refund|credit|reversal", case=False, na=False
+    )
+
+    income = df.loc[df["is_income"], "amount"].sum()
+    expenses = df.loc[~df["is_income"], "amount"].abs().sum()
+
+    net = income - expenses  # can ignore this on the frontend if you don't care about net right now
+
+    result = {
+        "income": round(float(income), 2),
+        "expenses": round(float(expenses), 2),
+        "net_balance": round(float(net), 2),
+    }
     write_cache(result)
     return jsonify(result)
 
@@ -437,7 +505,11 @@ def api_category_trends():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
     if df.empty or "category" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
-    df["date"] = pd.to_datetime(df["date"], errors="coerce").dropna()
+
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+
     df["month"] = df["date"].dt.to_period("M").astype(str)
     grouped = df.groupby(["month", "category"])["amount"].sum().reset_index()
     pivot = grouped.pivot(index="month", columns="category", values="amount").fillna(0)
