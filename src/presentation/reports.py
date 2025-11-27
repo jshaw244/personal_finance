@@ -14,7 +14,7 @@ Includes:
 
 from flask import (
     Blueprint, render_template, send_from_directory, abort,
-    jsonify, request, redirect, url_for, flash
+    jsonify, request, redirect, url_for, flash, current_app
 )
 from flask_login import (
     LoginManager, UserMixin, login_user, logout_user,
@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, date
 import pandas as pd
 import sqlite3, os, logging, bcrypt, re, json, math, random, string
 import subprocess, sys
+from src.common.paths import DB_FILE
 
 
 # -------------------------------------------------------------------
@@ -37,7 +38,7 @@ login_manager.login_view = "reports.login"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = PROJECT_ROOT / "results"
-DB_PATH = PROJECT_ROOT / "data" / "plaid.db"
+DB_PATH = DB_FILE
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True, parents=True)
 MAINT_LOG = LOG_DIR / "maintenance.log"
@@ -53,6 +54,18 @@ if not maint_logger.handlers:
 def log_access(msg: str):
     maint_logger.info(msg)
     print(f"[ACCESS] {msg}")
+
+def write_cache(data):
+    """
+    Write small JSON payloads to CACHE_PATH for quick reuse.
+    In production this is optional; failures are silently ignored.
+    """
+    try:
+        with open(CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+    except Exception:
+        # Never let cache writes break the API
+        pass
 
 # -------------------------------------------------------------------
 # Environment credentials
@@ -175,13 +188,19 @@ def _derive_category(name: str, merchant: str) -> str:
     return "Other"
 
 def _load_tx_detail() -> pd.DataFrame:
-    f = _latest_result_file()
-    if f and f.suffix.lower() == ".xlsx":
-        df = _load_tx_detail_from_excel(f)
-        if df.empty:
-            df = _load_tx_detail_from_db()
-    else:
+    # In production, always use the live database
+    if ENV_TARGET == "production":
         df = _load_tx_detail_from_db()
+    else:
+        # In sandbox/dev, prefer latest Excel snapshot, then fallback to DB
+        f = _latest_result_file()
+        if f and f.suffix.lower() == ".xlsx":
+            df = _load_tx_detail_from_excel(f)
+            if df.empty:
+                df = _load_tx_detail_from_db()
+        else:
+            df = _load_tx_detail_from_db()
+
     if df.empty:
         return df
 
@@ -198,12 +217,11 @@ def _load_tx_detail() -> pd.DataFrame:
     )
 
     if "amount" in df.columns:
-        # Convention: positive = expense, negative = income (general financial)
-        # But your data often has income as "credits" flagged by merchant name. Keep both tags.
         df["spending_type"] = df["amount"].apply(lambda x: "income" if x < 0 else "expense")
     else:
         df["spending_type"] = "unknown"
     return df
+
 
 def _filter_by_range(df: pd.DataFrame, range_key: str) -> pd.DataFrame:
     if df.empty or "date" not in df.columns:
@@ -949,6 +967,17 @@ def api_insights_summary():
         })
 
     return jsonify(insights)
+
+@reports_bp.route("/api/debug_state")
+@login_required
+def api_debug_state():
+    df = _load_tx_detail()
+    return jsonify({
+        "env_target": ENV_TARGET,
+        "db_path": str(DB_PATH),
+        "tx_rows": int(len(df)),
+        "columns": list(df.columns) if not df.empty else [],
+    })
 
 
 # -------------------------------------------------------------------

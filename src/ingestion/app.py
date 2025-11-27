@@ -154,6 +154,102 @@ def save_webhook_event(webhook_type, webhook_code, item_id, payload):
     conn.close()
 
 # ------------------------------------------------------------
+#  Plaid API Routes (Link Token, Exchange, Accounts, Transactions)
+# ------------------------------------------------------------
+
+@app.route("/link_token/create", methods=["POST"])
+def link_token_create():
+    """Create a link_token for Plaid Link."""
+    try:
+        req = LinkTokenCreateRequest(
+            products=[Products("transactions")],
+            client_name="Personal Finance App",
+            country_codes=[CountryCode("US")],
+            language="en",
+            user=LinkTokenCreateRequestUser(client_user_id=str(time.time())),
+            link_customization_name = "data_transparency_messaging"
+        )
+        res = client.link_token_create(req)
+        return jsonify(res.to_dict())
+    except Exception as e:
+        log_app(f"Error in link_token_create: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/item/public_token/exchange", methods=["POST"])
+def item_public_token_exchange():
+    """Exchange the public_token for an access_token."""
+    try:
+        public_token = request.json.get("public_token")
+        req = ItemPublicTokenExchangeRequest(public_token=public_token)
+        res = client.item_public_token_exchange(req)
+
+        access_token = res.to_dict()["access_token"]
+        item_id = res.to_dict()["item_id"]
+
+        save_item(item_id, access_token)
+        log_app(f"Stored Item: {item_id}")
+        return jsonify({"item_id": item_id})
+    except Exception as e:
+        log_app(f"Error during public_token exchange: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/accounts", methods=["GET"])
+def get_accounts():
+    """Fetch accounts for the most recent Item."""
+    try:
+        items = get_all_items()
+        if not items:
+            return jsonify({"error": "No linked items yet"}), 400
+
+        access_token = items[-1]["access_token"]
+        req = AccountsGetRequest(access_token=access_token)
+        res = client.accounts_get(req)
+        return jsonify(res.to_dict())
+    except Exception as e:
+        log_app(f"Error fetching accounts: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/transactions", methods=["GET"])
+def get_transactions():
+    """Fetch recent transactions and store them."""
+    try:
+        items = get_all_items()
+        if not items:
+            return jsonify({"error": "No linked items yet"}), 400
+
+        item = items[-1]  # most recently linked institution
+        access_token = item["access_token"]
+        item_id = item["item_id"]
+
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+
+        req = TransactionsGetRequest(
+            access_token=access_token,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        res = client.transactions_get(req).to_dict()
+
+        transactions = res.get("transactions", [])
+        if transactions:
+            save_transactions(item_id, transactions)  # ✅ correct signature
+
+        return jsonify({
+            "item_id": item_id,
+            "count": len(transactions),
+            "transactions": transactions
+        })
+
+    except Exception as e:
+        log_app(f"Error fetching transactions: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+
+# ------------------------------------------------------------
 #  Routes
 # ------------------------------------------------------------
 @app.route("/")

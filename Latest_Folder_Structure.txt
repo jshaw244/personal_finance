@@ -19,7 +19,6 @@ C:.
 │
 ├───backups
 │       development_plaid_20251019_1450.db
-│       plaid_20251019_1138.db
 │       plaid_20251019_1223.db
 │       plaid_20251019_1457.db
 │       plaid_20251019_1516.db
@@ -29,6 +28,7 @@ C:.
 │       plaid_20251019_2232.db
 │       plaid_20251019_2249.db
 │       plaid_20251026_2229.db
+│       plaid_20251109_1419.db
 │       schema_20251012_1656.sql
 │       schema_20251012_1657.sql
 │       schema_20251012_1703.sql
@@ -99,6 +99,7 @@ C:.
 │       session_snapshot_20251026_2220.yaml
 │       session_snapshot_20251026_2231.yaml
 │       session_snapshot_20251026_2243.yaml
+│       session_snapshot_20251027_2237.yaml
 │       webhook.log
 │
 ├───maintenance
@@ -108,6 +109,10 @@ C:.
 │       .gitkeep
 │
 ├───results
+│   │   dev_analysis_summary_20251027_2109.xlsx
+│   │   dev_by_category.png
+│   │   dev_monthly_trend.png
+│   │   dev_table_summary_20251027_2109.csv
 │   │   qa_snapshot_20251019_2156.xlsx
 │   │   qa_snapshot_20251019_2233.xlsx
 │   │   qa_snapshot_20251019_2236.xlsx
@@ -142,6 +147,7 @@ C:.
 │       run.ps1
 │
 ├───scripts
+│   │   check_indexes.py
 │   │   check_webhooks.py
 │   │   check_webhook_events.py
 │   │   compare_db_snapshots.ps1
@@ -172,6 +178,7 @@ C:.
 │   │   run_analysis.ps1
 │   │   run_validation.ps1
 │   │   sanitize_ps.ps1
+│   │   seed_dev_db.py
 │   │   seed_transactions.py
 │   │   setup_gitignore.ps1
 │   │   show_recent_transactions.py
@@ -198,6 +205,7 @@ C:.
 │   │
 │   ├───analysis
 │   │   │   analysis.py
+│   │   │   analysis_dev.py
 │   │   │   analysis_summary.py
 │   │   │
 │   │   └───__pycache__

@@ -89,7 +89,11 @@ def save_item(item_id, access_token, institution=None):
 def get_all_items():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("SELECT item_id, access_token, institution FROM items")
-        return cur.fetchall()
+        rows = cur.fetchall()
+        return [
+            {"item_id": r[0], "access_token": r[1], "institution": r[2]}
+            for r in rows
+        ]
 
 # -----------------------------
 # Account helpers
