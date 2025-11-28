@@ -46,6 +46,10 @@ ENV_MAP = {
 }
 plaid_host = ENV_MAP.get(PLAID_ENV, "https://sandbox.plaid.com")
 
+print("DEBUG app.py: ENV_TARGET=", os.getenv("ENV_TARGET"),
+      " PLAID_ENV=", PLAID_ENV,
+      " plaid_host=", plaid_host)
+
 configuration = plaid.Configuration(
     host=plaid_host,
     api_key={"clientId": PLAID_CLIENT_ID, "secret": PLAID_SECRET}
