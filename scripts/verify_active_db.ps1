@@ -13,8 +13,12 @@
 
 param(
     [ValidateSet("sandbox","development","production")]
+    [string]$Target,
+    
+    [ValidateSet("sandbox","development","production")]
     [string]$Rebuild
 )
+
 
 $ErrorActionPreference = "Stop"
 
