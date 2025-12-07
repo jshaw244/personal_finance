@@ -19,9 +19,6 @@ C:.
 │
 ├───backups
 │       development_plaid_20251019_1450.db
-│       plaid_20251019_1223.db
-│       plaid_20251019_1457.db
-│       plaid_20251019_1516.db
 │       plaid_20251019_1519.db
 │       plaid_20251019_2014.db
 │       plaid_20251019_2109.db
@@ -29,6 +26,9 @@ C:.
 │       plaid_20251019_2249.db
 │       plaid_20251026_2229.db
 │       plaid_20251109_1419.db
+│       plaid_20251109_1529.db
+│       plaid_20251109_1550.db
+│       plaid_20251109_1619.db
 │       schema_20251012_1656.sql
 │       schema_20251012_1657.sql
 │       schema_20251012_1703.sql
@@ -44,6 +44,7 @@ C:.
 │   └───env
 │           .env.development
 │           .env.production
+│           .env.production.bak
 │           .env.sandbox
 │           .env.sandbox.bak
 │           .gitkeep
@@ -90,16 +91,16 @@ C:.
 │       sanitizer.log
 │       schema_watcher.log
 │       session_snapshot.yaml
-│       session_snapshot_20251012_2251.yaml
-│       session_snapshot_20251013_1920.yaml
-│       session_snapshot_20251013_1934.yaml
-│       session_snapshot_20251018_1708.yaml
-│       session_snapshot_20251019_1110.yaml
-│       session_snapshot_20251026_2155.yaml
 │       session_snapshot_20251026_2220.yaml
 │       session_snapshot_20251026_2231.yaml
 │       session_snapshot_20251026_2243.yaml
 │       session_snapshot_20251027_2237.yaml
+│       session_snapshot_20251109_1429.yaml
+│       session_snapshot_20251126_2130.yaml
+│       session_snapshot_20251126_2133.yaml
+│       session_snapshot_20251127_1027.yaml
+│       session_snapshot_20251127_2239.yaml
+│       session_snapshot_20251129_1445.yaml
 │       webhook.log
 │
 ├───maintenance
@@ -116,6 +117,7 @@ C:.
 │   │   qa_snapshot_20251019_2156.xlsx
 │   │   qa_snapshot_20251019_2233.xlsx
 │   │   qa_snapshot_20251019_2236.xlsx
+│   │   qa_snapshot_20251109_1522.xlsx
 │   │   sandbox_analysis_summary_20251010_2248.txt
 │   │   sandbox_analysis_summary_20251010_2306.txt
 │   │   sandbox_analysis_summary_20251010_2315.txt
@@ -148,6 +150,8 @@ C:.
 │
 ├───scripts
 │   │   check_indexes.py
+│   │   check_prod_summary.ps1
+│   │   check_prod_view.ps1
 │   │   check_webhooks.py
 │   │   check_webhook_events.py
 │   │   compare_db_snapshots.ps1
@@ -155,6 +159,8 @@ C:.
 │   │   count_transactions.py
 │   │   create_dev_prod_dbs.ps1
 │   │   create_docs_structure.ps1
+│   │   db_explorer.py
+│   │   ensure_prod_view.ps1
 │   │   explore_transactions.py
 │   │   export_db_snapshot.ps1
 │   │   export_db_snapshot.py
@@ -162,8 +168,10 @@ C:.
 │   │   generate_password_hash.py
 │   │   generate_qa_snapshot.py
 │   │   generate_summary_tables.py
+│   │   inspect_active_db_users.py
 │   │   inspect_db.py
 │   │   inspect_snapshot_db_state.py
+│   │   inspect_users.ps1
 │   │   Install-PlaidProfileShortcuts.ps1
 │   │   list_items.py
 │   │   list_webhook_events.py
@@ -175,14 +183,18 @@ C:.
 │   │   readme.txt
 │   │   reset.ps1
 │   │   reset_personal_finance_app.ps1
+│   │   reset_reports_user.ps1
+│   │   reset_report_admin_password.py
 │   │   run_analysis.ps1
 │   │   run_validation.ps1
 │   │   sanitize_ps.ps1
 │   │   seed_dev_db.py
 │   │   seed_transactions.py
 │   │   setup_gitignore.ps1
+│   │   set_reports_password.ps1
 │   │   show_recent_transactions.py
 │   │   sync_schemas.ps1
+│   │   test.sql
 │   │   test_reports_api.ps1
 │   │   test_sandbox_analysis.py
 │   │   test_webhook.py
@@ -195,10 +207,27 @@ C:.
 │   │   verify_db_objects.py
 │   │   watchdog_cleanup.ps1
 │   │
-│   └───old
-│           plaid_profile_snippet.ps1
-│           stop_environment.ps1
-│
+│   ├───.vs
+│   │   │   slnx.sqlite
+│   │   │   VSWorkspaceState.json
+│   │   │
+│   │   └───scripts
+│   │       ├───CopilotIndices
+│   │       │   └───17.14.734.62261
+│   │       │           CodeChunks.db
+│   │       │           SemanticSymbols.db
+│   │       │
+│   │       ├───FileContentIndex
+│   │       │       c0dd510b-2040-4b27-9212-0c2a5d598823.vsidx
+│   │       │
+│   │       └───v17
+│   │               DocumentLayout.json
+│   │
+│   ├───old
+│   │       plaid_profile_snippet.ps1
+│   │       stop_environment.ps1
+│   │
+│   └───sql
 ├───src
 │   │   requirements.txt
 │   │   __init__.py

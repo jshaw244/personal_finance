@@ -1,22 +1,15 @@
 <#
 .SYNOPSIS
     Unified launcher for sandbox, development, and production environments.
-.DESCRIPTION
-    - Resolves the project root relative to this script and sets it as the working directory
-    - Creates or activates the local virtual environment (.venv)
-    - Sets ENV_TARGET and PYTHONPATH for the selected target (sandbox/development/production)
-    - Optional maintenance mode: opens an activated shell for manual DB / app work
-    - Verifies the active database state via scripts\verify_active_db.ps1 (if present)
-    - Auto-kills stale Flask/ngrok processes on the reserved ports (5000–5002)
-    - Backs up the primary SQLite database (data\plaid.db) and schema.sql with simple rotation
-    - Launches the schema watcher (runs\automation\watch_schema.ps1) in a separate PowerShell window
-    - Starts an ngrok tunnel for the target port (if ngrok is installed) and sets PLAID_WEBHOOK_URL
-    - Starts the Flask app (`python -m src.ingestion.app`) in a titled PowerShell window for the selected target
-    - Opens the local app URL and, if available, the ngrok public URL in the default browser
-    - Spawns a debug terminal preloaded with the virtual environment, ENV_TARGET, and debug_db helpers
-    - Optionally runs scripts\run_analysis.ps1 for the selected target with configurable date range
-#>
 
+.DESCRIPTION
+    - Activates or creates virtual environment
+    - Loads environment variables for selected target
+    - Auto-kills stale Flask/ngrok processes before startup
+    - Backs up database and schema
+    - Starts Flask app, ngrok tunnel, schema watcher, and optional analysis
+    - Supports graceful cleanup and logging
+#>
 
 param(
     [Parameter(Mandatory = $true)]
@@ -38,16 +31,11 @@ $BackupKeep = 10
 # -------------------------------------------------------------------
 $ProjectRoot  = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $ProjectRoot
-$dbMap = @{
-    "sandbox"     = "plaid.db"
-    "development" = "plaid_dev.db"
-    "production"  = "plaid_prod.db"
-}
+
 $logDir        = Join-Path $ProjectRoot "logs"
 $dataDir       = Join-Path $ProjectRoot "data"
 $schemaFile    = Join-Path $ProjectRoot "src\storage\schema.sql"
-$dbFileName = $dbMap[$Target]
-$dbFile     = Join-Path $dataDir $dbFileName
+$dbFile        = Join-Path $dataDir "plaid.db"
 $backupDir     = Join-Path $ProjectRoot "backups"
 $WatcherScript = Join-Path $ProjectRoot "runs\automation\watch_schema.ps1"
 
@@ -67,7 +55,7 @@ Write-Host "Port:         $port`n"
 $verifyScript = Join-Path $ProjectRoot "scripts\verify_active_db.ps1"
 if (Test-Path $verifyScript) {
     Write-Host "Verifying active database state..."
-    & powershell -ExecutionPolicy Bypass -File $verifyScript -Target $Target
+    & powershell -ExecutionPolicy Bypass -File $verifyScript
     Write-Host "Database verification complete.`n"
 } else {
     Write-Host "Warning: verify_active_db.ps1 not found." -ForegroundColor Yellow
@@ -85,13 +73,11 @@ if ($Maintenance) {
     . .\.venv\Scripts\Activate.ps1
     $env:ENV_TARGET = $Target
     $env:PYTHONPATH = $ProjectRoot
-    $env:PLAID_ENV = $Target
     Write-Host "`nMaintenance shell ready.`n" -ForegroundColor Green
     powershell -NoExit -Command {
         . .\.venv\Scripts\Activate.ps1
         $env:ENV_TARGET = $Target
         $env:PYTHONPATH = (Get-Location).Path
-        $env:PLAID_ENV = $Target
         Write-Host "`nMaintenance shell active.`n" -ForegroundColor Green
     }
     exit 0
@@ -122,7 +108,6 @@ Write-Host "All Flask/ngrok conflicts cleared. Ports 5000–5002 free." -Foregro
 # -------------------------------------------------------------------
 $env:ENV_TARGET = $Target
 $env:PYTHONPATH = $ProjectRoot
-$env:PLAID_ENV = $Target
 
 python --version | Out-Null
 if (-not (Test-Path ".\.venv")) {
@@ -202,7 +187,6 @@ $flaskCmd = @"
 `$Host.UI.RawUI.WindowTitle = '$flaskTitle';
 . .\.venv\Scripts\Activate.ps1;
 `$env:ENV_TARGET = '$Target';
-`$env:PLAID_ENV = '$Target';
 `$env:PYTHONPATH = '$ProjectRoot';
 python -m src.ingestion.app
 "@
@@ -220,7 +204,6 @@ $debugScript = Join-Path $env:TEMP "debug_terminal.ps1"
 cd "$ProjectRoot"
 . .\.venv\Scripts\Activate.ps1
 `$env:ENV_TARGET = '$Target'
-`$env:PLAID_ENV  = '$Target'
 `$env:PYTHONPATH = (Get-Location).Path
 Write-Host "Debug terminal ready for environment: $Target"
 python -m src.ingestion.debug_db schema

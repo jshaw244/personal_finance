@@ -240,7 +240,7 @@ def get_transactions():
 
         transactions = res.get("transactions", [])
         if transactions:
-            save_transactions(item_id, transactions)  # ✅ correct signature
+            save_transactions(item_id, transactions)  # correct signature
 
         return jsonify({
             "item_id": item_id,
