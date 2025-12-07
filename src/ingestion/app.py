@@ -23,7 +23,14 @@ from plaid.model.transactions_get_request import TransactionsGetRequest
 # ------------------------------------------------------------
 from src.common.config import load_env
 from src.common.utils import convert, to_safe_json
-from src.storage.db import init_db, save_item, get_all_items, save_transactions, log_event_db
+from src.storage.db import (
+    init_db,
+    save_item,
+    get_all_items,
+    save_transactions,
+    save_accounts,
+    log_event_db
+)
 from src.ingestion.debug_db import analyze_db, vacuum_db
 from src.common.paths import LOG_DIR, DB_FILE
 
@@ -188,12 +195,30 @@ def item_public_token_exchange():
         req = ItemPublicTokenExchangeRequest(public_token=public_token)
         res = client.item_public_token_exchange(req)
 
-        access_token = res.to_dict()["access_token"]
-        item_id = res.to_dict()["item_id"]
+        res_dict = res.to_dict()
+        access_token = res_dict["access_token"]
+        item_id = res_dict["item_id"]
 
+        # Save the item itself
         save_item(item_id, access_token)
         log_app(f"Stored Item: {item_id}")
+
+        # Immediately fetch & save accounts for this item
+        try:
+            acct_req = AccountsGetRequest(access_token=access_token)
+            acct_res = client.accounts_get(acct_req).to_dict()
+            accounts = acct_res.get("accounts", [])
+            if accounts:
+                save_accounts(item_id, accounts)
+                log_app(f"Saved {len(accounts)} accounts for item {item_id}")
+        except Exception as e:
+            log_app(
+                f"Warning: could not fetch/save accounts for new item {item_id}: {e}",
+                "warning"
+            )
+
         return jsonify({"item_id": item_id})
+
     except Exception as e:
         log_app(f"Error during public_token exchange: {e}", "error")
         return jsonify({"error": str(e)}), 400
@@ -201,19 +226,31 @@ def item_public_token_exchange():
 
 @app.route("/accounts", methods=["GET"])
 def get_accounts():
-    """Fetch accounts for the most recent Item."""
+    """Fetch accounts for the most recent Item and persist them."""
     try:
         items = get_all_items()
         if not items:
             return jsonify({"error": "No linked items yet"}), 400
 
-        access_token = items[-1]["access_token"]
+        # Most recently linked item
+        item = items[-1]
+        item_id = item["item_id"]
+        access_token = item["access_token"]
+
         req = AccountsGetRequest(access_token=access_token)
-        res = client.accounts_get(req)
-        return jsonify(res.to_dict())
+        res = client.accounts_get(req).to_dict()
+        accounts = res.get("accounts", [])
+
+        if accounts:
+            save_accounts(item_id, accounts)
+            log_app(f"Refreshed {len(accounts)} accounts for item {item_id}")
+
+        return jsonify(res)
+
     except Exception as e:
         log_app(f"Error fetching accounts: {e}", "error")
         return jsonify({"error": str(e)}), 400
+
 
 
 @app.route("/transactions", methods=["GET"])

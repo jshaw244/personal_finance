@@ -5,11 +5,13 @@ from datetime import datetime
 
 from src.common.paths import DB_FILE as DB_PATH
 
+
 def get_connection():
     """Return a sqlite3 connection to the Plaid DB (auto row dicts)."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn 
+
 
 # -----------------------------
 # Core DB Setup
@@ -72,6 +74,7 @@ def init_db():
             )
         """)
 
+
 # -----------------------------
 # Item helpers
 # -----------------------------
@@ -86,6 +89,7 @@ def save_item(item_id, access_token, institution=None):
                 updated_at=CURRENT_TIMESTAMP
         """, (item_id, access_token, institution))
 
+
 def get_all_items():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("SELECT item_id, access_token, institution FROM items")
@@ -95,31 +99,79 @@ def get_all_items():
             for r in rows
         ]
 
+
 # -----------------------------
 # Account helpers
 # -----------------------------
 def save_accounts(item_id, accounts):
+    """
+    Persist Plaid accounts for a given item into the accounts table.
+
+    Expects each `account` dict to look like Plaid's /accounts/get response:
+      {
+        "account_id": "...",
+        "name": "...",
+        "official_name": "...",
+        "mask": "...",
+        "type": "...",
+        "subtype": "...",
+        "balances": {
+            "current": ...,
+            "available": ...,
+            "iso_currency_code": "...",
+            "unofficial_currency_code": "..."
+        },
+        ...
+      }
+
+    We don't currently store account_id in this schema; we snapshot
+    balances + metadata keyed by item_id.
+    """
     with sqlite3.connect(DB_PATH) as conn:
-        conn.executemany("""
-            INSERT INTO accounts (
-                item_id, name, official_name, mask, type, subtype,
-                current, available, iso_currency_code
+        cur = conn.cursor()
+
+        # Remove existing accounts for this item to avoid duplicates
+        cur.execute("DELETE FROM accounts WHERE item_id = ?", (item_id,))
+
+        for a in accounts:
+            balances = a.get("balances", {}) or {}
+            current = balances.get("current")
+            available = balances.get("available")
+            iso_ccy = (
+                balances.get("iso_currency_code")
+                or balances.get("unofficial_currency_code")
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            (
-                item_id,
-                a.get("name"),
-                a.get("official_name"),
-                a.get("mask"),
-                a.get("type"),
-                a.get("subtype"),
-                a.get("current"),
-                a.get("available"),
-                a.get("iso_currency_code"),
+
+            cur.execute(
+                """
+                INSERT INTO accounts (
+                    item_id,
+                    name,
+                    official_name,
+                    mask,
+                    type,
+                    subtype,
+                    current,
+                    available,
+                    iso_currency_code
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    a.get("name"),
+                    a.get("official_name"),
+                    a.get("mask"),
+                    a.get("type"),
+                    a.get("subtype"),
+                    current,
+                    available,
+                    iso_ccy,
+                ),
             )
-            for a in accounts
-        ])
+
+        conn.commit()
+
 
 # -----------------------------
 # Transaction helpers
@@ -148,6 +200,7 @@ def save_transactions(item_id, transactions):
                 t.get("unofficial_currency_code"),
             ))
 
+
 # -----------------------------
 # Webhook helpers
 # -----------------------------
@@ -175,6 +228,7 @@ def save_webhook_event(webhook_type, webhook_code, item_id, payload):
             item_id,
             json.dumps(payload)
         ))
+
 
 # -----------------------------
 # Logging helpers
