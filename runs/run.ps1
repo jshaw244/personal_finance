@@ -1,4 +1,4 @@
-<#
+<# .\runs\run.ps1
 .SYNOPSIS
     Unified launcher for sandbox, development, and production environments.
 .DESCRIPTION
@@ -77,24 +77,29 @@ if (Test-Path $verifyScript) {
 # Maintenance shell
 # -------------------------------------------------------------------
 if ($Maintenance) {
-    Write-Host "Entering maintenance mode..." -ForegroundColor Cyan
-    if (-not (Test-Path ".\.venv")) {
-        Write-Host "Creating virtual environment..." -ForegroundColor Yellow
-        python -m venv .venv
-    }
-    . .\.venv\Scripts\Activate.ps1
-    $env:ENV_TARGET = $Target
-    $env:PYTHONPATH = $ProjectRoot
-    $env:PLAID_ENV = $Target
-    Write-Host "`nMaintenance shell ready.`n" -ForegroundColor Green
-    powershell -NoExit -Command {
-        . .\.venv\Scripts\Activate.ps1
-        $env:ENV_TARGET = $Target
-        $env:PYTHONPATH = (Get-Location).Path
-        $env:PLAID_ENV = $Target
-        Write-Host "`nMaintenance shell active.`n" -ForegroundColor Green
-    }
-    exit 0
+ Write-Host "Entering maintenance mode..." -ForegroundColor Cyan
+ if (-not (Test-Path ".\.venv")) {
+     Write-Host "Creating virtual environment..." -ForegroundColor Yellow
+     python -m venv .venv
+ }
+
+ . .\.venv\Scripts\Activate.ps1
+ $env:ENV_TARGET     = $Target
+ $env:PYTHONPATH     = $ProjectRoot
+ $env:PLAID_ENV      = $Target
+ $env:FLASK_RUN_PORT = $port
+ Write-Host "`nMaintenance shell ready.`n" -ForegroundColor Green
+
+ powershell -NoExit -Command "
+     . .\.venv\Scripts\Activate.ps1;
+     `$env:ENV_TARGET     = '$Target';
+     `$env:PYTHONPATH     = (Get-Location).Path;
+     `$env:PLAID_ENV      = '$Target';
+     `$env:FLASK_RUN_PORT = '$port';
+     Write-Host \"`nMaintenance shell active.`n\" -ForegroundColor Green;
+ "
+
+ exit 0
 }
 
 # -------------------------------------------------------------------
@@ -123,6 +128,8 @@ Write-Host "All Flask/ngrok conflicts cleared. Ports 5000–5002 free." -Foregro
 $env:ENV_TARGET = $Target
 $env:PYTHONPATH = $ProjectRoot
 $env:PLAID_ENV = $Target
+$env:FLASK_RUN_PORT = $port
+
 
 python --version | Out-Null
 if (-not (Test-Path ".\.venv")) {
@@ -204,6 +211,7 @@ $flaskCmd = @"
 `$env:ENV_TARGET = '$Target';
 `$env:PLAID_ENV = '$Target';
 `$env:PYTHONPATH = '$ProjectRoot';
+`$env:FLASK_RUN_PORT = '$port';
 python -m src.ingestion.app
 "@
 Start-Process pwsh -ArgumentList "-NoExit", "-Command", $flaskCmd
@@ -221,6 +229,7 @@ cd "$ProjectRoot"
 . .\.venv\Scripts\Activate.ps1
 `$env:ENV_TARGET = '$Target'
 `$env:PLAID_ENV  = '$Target'
+`$env:FLASK_RUN_PORT = '$port'
 `$env:PYTHONPATH = (Get-Location).Path
 Write-Host "Debug terminal ready for environment: $Target"
 python -m src.ingestion.debug_db schema
@@ -246,3 +255,4 @@ if ($IncludeAnalysis) {
 
 Write-Host "`n=== $Target environment startup complete ===" -ForegroundColor Cyan
 Write-Host "Close Flask/Watcher windows manually when finished (auto-cleanup handled on next run)." -ForegroundColor DarkGray
+#>
