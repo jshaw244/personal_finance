@@ -7,10 +7,18 @@ import sqlite3
 import os
 import datetime
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DB_FILE = os.path.join(PROJECT_ROOT, "data", "plaid.db")
+# NEW: reuse the same paths/env logic as the app
+from src.common.config import load_env
+from src.common.paths import PROJECT_ROOT, DB_FILE as DB_PATH, LOG_DIR
+
+# Ensure ENV_TARGET is set (sandbox|development|production)
+ENV_TARGET = os.getenv("ENV_TARGET", "sandbox")
+load_env(ENV_TARGET)  # makes sure env + DATABASE_URL/DB_FILE are aligned
+
+PROJECT_ROOT = str(PROJECT_ROOT)
+DB_FILE = str(DB_PATH)  # this will now be ...plaid.db, plaid_dev.db, or plaid_prod.db
 SCHEMA_FILE = os.path.join(PROJECT_ROOT, "src", "storage", "schema.sql")
-LOG_FILE = os.path.join(PROJECT_ROOT, "logs", "schema_watcher.log")
+LOG_FILE = os.path.join(LOG_DIR, "schema_watcher.log")
 
 def log(msg: str):
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

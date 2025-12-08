@@ -1,4 +1,4 @@
-# src/common/config.py
+# ./src/common/config.py
 # Purpose: Centralize environment loading per target (sandbox|development|production)
 # Usage:
 #   from src.common.config import load_env

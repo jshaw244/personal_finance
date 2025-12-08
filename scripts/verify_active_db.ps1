@@ -1,4 +1,4 @@
-<#
+<# .\scripts\verify_active_db.ps1
 .SYNOPSIS
     Verifies and initializes SQLite databases for each environment (sandbox, development, production).
 

@@ -124,40 +124,43 @@ def save_accounts(item_id, accounts):
         ...
       }
 
-    We don't currently store account_id in this schema; we snapshot
-    balances + metadata keyed by item_id.
+    Uses Plaid's `account_id` as the PRIMARY KEY so we can safely
+    upsert accounts without duplicates.
     """
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        # Remove existing accounts for this item to avoid duplicates
+        # Remove existing accounts for this item to avoid stale rows
         cur.execute("DELETE FROM accounts WHERE item_id = ?", (item_id,))
 
         for a in accounts:
-            balances = a.get("balances", {}) or {}
+            balances = a.get("balances") or {}
             current = balances.get("current")
             available = balances.get("available")
-            iso_ccy = (
-                balances.get("iso_currency_code")
-                or balances.get("unofficial_currency_code")
-            )
+            iso_ccy = balances.get("iso_currency_code")
+            unofficial_ccy = balances.get("unofficial_currency_code")
 
             cur.execute(
                 """
-                INSERT INTO accounts (
+                INSERT OR REPLACE INTO accounts (
+                    account_id,
                     item_id,
                     name,
                     official_name,
                     mask,
                     type,
                     subtype,
+                    current_balance,
+                    available_balance,
+                    iso_currency_code,
+                    unofficial_currency_code,
                     current,
-                    available,
-                    iso_currency_code
+                    available
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    a.get("account_id"),     # <-- Plaid account_id
                     item_id,
                     a.get("name"),
                     a.get("official_name"),
@@ -167,6 +170,9 @@ def save_accounts(item_id, accounts):
                     current,
                     available,
                     iso_ccy,
+                    unofficial_ccy,
+                    current,
+                    available,
                 ),
             )
 
