@@ -1,12 +1,12 @@
 """
-Personal Finance Sandbox App
+Personal Finance App
 - Flask + Plaid integration
 - Local + ngrok access
 - Flask-Login authentication for /reports
 """
 
 import os, sqlite3, json, time, logging, plaid
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from flask import Flask, jsonify, request, make_response
 from plaid.api import plaid_api
 from plaid.exceptions import ApiException
@@ -29,7 +29,8 @@ from src.storage.db import (
     get_all_items,
     save_transactions,
     save_accounts,
-    log_event_db
+    log_event_db,
+    insert_plaid_raw   # <-- add this
 )
 from src.ingestion.debug_db import analyze_db, vacuum_db
 from src.common.paths import LOG_DIR, DB_FILE
@@ -115,6 +116,99 @@ app.permanent_session_lifetime = timedelta(
 #
 
 # ------------------------------------------------------------
+#  raw data helpers
+# ------------------------------------------------------------
+import os
+import json
+from datetime import datetime
+from src.common.paths import DATA_DIR
+
+RAW_DIR = DATA_DIR / "raw" / "plaid" / ENV_TARGET
+RAW_DIR.mkdir(parents=True, exist_ok=True)
+
+RAW_CAPTURE_ENABLED = os.getenv("RAW_PLAID_CAPTURE", "1") == "1"
+RAW_CAPTURE_LIMIT = int(os.getenv("RAW_PLAID_CAPTURE_LIMIT", "25"))  # keep last N files per endpoint
+
+# Note: "client_id" and "secret" will almost never appear in responses, but harmless to include.
+SENSITIVE_KEYS = {"access_token", "public_token", "secret", "client_id"}
+
+def _redact(obj):
+    """Recursively redact sensitive keys in dict/list structures."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in SENSITIVE_KEYS:
+                out[k] = "[REDACTED]"
+            else:
+                out[k] = _redact(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact(x) for x in obj]
+    return obj
+
+def _trim_raw_files(endpoint: str):
+    prefix = endpoint.replace("/", "_") + "_"
+    files = sorted(
+        [p for p in RAW_DIR.glob(f"{prefix}*.json")],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+    for p in files[RAW_CAPTURE_LIMIT:]:
+        try:
+            p.unlink()
+        except Exception as e:
+            # don't crash app for cleanup issues
+            try:
+                log_event_db("plaid_raw", "WARNING", f"Trim raw file failed: {p.name} ({e})")
+            except Exception:
+                pass
+
+def capture_plaid_raw(endpoint: str, item_id: str | None, payload: dict):
+    """
+    Persist the full Plaid response payload (redacted) so you can inspect every raw field later.
+    1) Writes redacted JSON to disk (data/raw/plaid/<env>/...)
+    2) Inserts the same redacted JSON into DB table plaid_raw
+    """
+    if not RAW_CAPTURE_ENABLED:
+        return
+
+    safe = _redact(payload)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    iid = item_id or "no_item"
+    fname = f"{endpoint.replace('/', '_')}_{iid}_{ts}.json"
+    fpath = RAW_DIR / fname
+
+    # --- Write to disk ---
+    try:
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump(safe, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        # disk write failing shouldn't hide the payload entirely
+        log_event_db("plaid_raw", "ERROR", f"File write failed for {fname}: {e}")
+
+    # --- Insert into DB (redacted) ---
+    try:
+        req_id = safe.get("request_id") if isinstance(safe, dict) else None
+        insert_plaid_raw(
+            env_target=ENV_TARGET,
+            endpoint=endpoint,
+            item_id=item_id,
+            request_id=req_id,
+            payload=safe,
+        )
+    except Exception as e:
+        log_event_db("plaid_raw", "ERROR", f"DB insert failed for endpoint={endpoint} item_id={item_id}: {e}")
+
+    # --- Index entry in log_events (optional but useful) ---
+    try:
+        log_event_db("plaid_raw", "INFO", f"Captured {endpoint} raw payload -> {fpath.name}")
+    except Exception:
+        pass
+
+    _trim_raw_files(endpoint)
+
+# ------------------------------------------------------------
 #  Logging Setup
 # ------------------------------------------------------------
 init_db()
@@ -196,6 +290,7 @@ def item_public_token_exchange():
         res = client.item_public_token_exchange(req)
 
         res_dict = res.to_dict()
+        capture_plaid_raw("item/public_token/exchange", None, res_dict)
         access_token = res_dict["access_token"]
         item_id = res_dict["item_id"]
 
@@ -207,6 +302,7 @@ def item_public_token_exchange():
         try:
             acct_req = AccountsGetRequest(access_token=access_token)
             acct_res = client.accounts_get(acct_req).to_dict()
+            capture_plaid_raw("accounts/get", item_id, acct_res)
             accounts = acct_res.get("accounts", [])
             if accounts:
                 save_accounts(item_id, accounts)
@@ -239,6 +335,7 @@ def get_accounts():
 
         req = AccountsGetRequest(access_token=access_token)
         res = client.accounts_get(req).to_dict()
+        capture_plaid_raw("accounts/get", item_id, res)
         accounts = res.get("accounts", [])
 
         if accounts:
@@ -274,6 +371,7 @@ def get_transactions():
             end_date=end_date,
         )
         res = client.transactions_get(req).to_dict()
+        capture_plaid_raw("transactions/get", item_id, res)
 
         transactions = res.get("transactions", [])
         if transactions:
@@ -312,7 +410,7 @@ def index():
   </head>
   <body>
     <h1>Plaid Link → Exchange → Fetch</h1>
-    <p>Connect a (sandbox) bank, then fetch accounts & transactions.</p>
+    <p>Connect a bank, then fetch accounts & transactions.</p>
     <button id="link-btn">Connect a bank</button>
     <button id="accounts-btn" disabled>Fetch Accounts</button>
     <button id="txns-btn" disabled>Fetch Transactions (last 30 days)</button>

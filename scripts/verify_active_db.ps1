@@ -1,145 +1,129 @@
 <# .\scripts\verify_active_db.ps1
 .SYNOPSIS
-    Verifies and initializes SQLite databases for each environment (sandbox, development, production).
+    Verifies and initializes SQLite databases (sandbox, development, production).
 
 .DESCRIPTION
-    - Confirms existence of each database
-    - Creates missing databases from src\storage\schema.sql
-    - Optional -Rebuild <env> parameter allows controlled resets
-      * Automatically backs up before rebuild
-      * Double confirmation required for production
-      * Logs rebuild events to logs\maintenance.log
+    - If -Target is provided: verifies only that environment
+    - If -Rebuild is provided: rebuilds only that environment (backs up first; extra prompts for prod)
+    - Otherwise: verifies all environments
+    - Uses scripts\init_db.py to initialize from src\storage\schema.sql (avoids quoting issues)
 #>
 
 param(
     [ValidateSet("sandbox","development","production")]
     [string]$Target,
-    
+
     [ValidateSet("sandbox","development","production")]
     [string]$Rebuild
 )
-
 
 $ErrorActionPreference = "Stop"
 
 # --- Core paths ---
 $ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path
-$dataDir     = Join-Path $ProjectRoot "data"
-$schemaFile  = Join-Path $ProjectRoot "src\storage\schema.sql"
-$backupDir   = Join-Path $ProjectRoot "backups"
-$logDir      = Join-Path $ProjectRoot "logs"
-$logFile     = Join-Path $logDir "maintenance.log"
+Set-Location -Path $ProjectRoot
 
-if (-not (Test-Path $schemaFile)) {
-    Write-Host "Error: schema.sql not found at $schemaFile" -ForegroundColor Red
-    exit 1
-}
-if (-not (Test-Path $backupDir)) {
-    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-}
-if (-not (Test-Path $logDir)) {
-    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-}
+$dataDir    = Join-Path $ProjectRoot "data"
+$schemaFile = Join-Path $ProjectRoot "src\storage\schema.sql"
+$backupDir  = Join-Path $ProjectRoot "backups"
+$logDir     = Join-Path $ProjectRoot "logs"
+$logFile    = Join-Path $logDir "maintenance.log"
+$initScript = Join-Path $ProjectRoot "scripts\init_db.py"
 
-# --- Environment database mapping ---
+if (-not (Test-Path $schemaFile)) { throw "schema.sql not found: $schemaFile" }
+if (-not (Test-Path $initScript)) { throw "init_db.py not found: $initScript" }
+if (-not (Test-Path $backupDir))  { New-Item -ItemType Directory -Force -Path $backupDir | Out-Null }
+if (-not (Test-Path $logDir))     { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
+
+# --- Env DB map ---
 $map = @{
     "sandbox"     = Join-Path $dataDir "plaid.db"
     "development" = Join-Path $dataDir "plaid_dev.db"
     "production"  = Join-Path $dataDir "plaid_prod.db"
 }
-$targets = $map.Keys
 
-# --- Read schema content ---
-$schema = Get-Content $schemaFile -Raw
-
-# --- Helper: write to maintenance log ---
-function Write-MaintenanceLog($message) {
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $entry = "[$timestamp] $message"
-    Add-Content -Path $logFile -Value $entry
+function Write-MaintenanceLog([string]$message) {
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $logFile -Value "[$ts] $message"
 }
 
-# --- Helper: create a new database ---
-function New-Database($target, $path) {
-    Write-Host "Creating $target database at $path ..."
-    $python = ".\.venv\Scripts\python.exe"
-    if (-not (Test-Path $python)) { $python = "python" }
-
-    $cmd = @"
-import sqlite3
-schema = r'''$schema'''
-conn = sqlite3.connect(r'''$path''')
-conn.executescript(schema)
-conn.commit()
-conn.close()
-print('Initialized:', r'''$path''')
-"@
-    $tmp = [IO.Path]::GetTempFileName() + ".py"
-    $cmd | Out-File -FilePath $tmp -Encoding UTF8
-    & $python $tmp
-    Remove-Item $tmp -Force
-    Write-MaintenanceLog "Database initialized: $target ($path)"
+function Resolve-Python {
+    $venvPy = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+    if (Test-Path $venvPy) { return $venvPy }
+    return "python"
 }
 
-# --- Helper: backup an existing database ---
-function Backup-Database($target, $path) {
-    if (Test-Path $path) {
-        $timestamp = Get-Date -Format "yyyyMMdd_HHmm"
-        $backup = Join-Path $backupDir ("${target}_$timestamp.db")
-        Copy-Item $path $backup -Force
-        Write-Host "Backup created: $backup"
-        Write-MaintenanceLog "Database backed up: $target -> $backup"
-    } else {
-        Write-Host "No database to back up for $target."
+function Backup-Database([string]$envName, [string]$dbPath) {
+    if (Test-Path $dbPath) {
+        $stamp = Get-Date -Format "yyyyMMdd_HHmm"
+        $dest = Join-Path $backupDir ("${envName}_$stamp.db")
+        Copy-Item $dbPath $dest -Force
+        Write-Host "Backup created: $dest" -ForegroundColor Green
+        Write-MaintenanceLog "Database backed up: $envName -> $dest"
     }
 }
 
-# --- Optional rebuild logic ---
-if ($Rebuild) {
-    $path = $map[$Rebuild]
+function New-Database([string]$envName, [string]$dbPath) {
+    $python = Resolve-Python
+    Write-Host "Creating $envName database at $dbPath ..." -ForegroundColor Yellow
+    & $python $initScript --db "$dbPath" --schema "$schemaFile"
+    Write-MaintenanceLog "Database initialized: $envName ($dbPath)"
+}
 
+# --- Determine scope ---
+# Priority: Rebuild > Target > All
+$targetsToCheck = @()
+if ($Rebuild) {
+    $targetsToCheck = @($Rebuild)
+} elseif ($Target) {
+    $targetsToCheck = @($Target)
+} else {
+    $targetsToCheck = @("sandbox","development","production")
+}
+
+# --- Print ACTIVE DB accurately (based on args only) ---
+if ($Rebuild) {
+    Write-Host ("ACTIVE DB (REBUILD {0}): {1}" -f $Rebuild.ToUpper(), $map[$Rebuild]) -ForegroundColor Cyan
+} elseif ($Target) {
+    Write-Host ("ACTIVE DB ({0}): {1}" -f $Target.ToUpper(), $map[$Target]) -ForegroundColor Cyan
+} else {
+    Write-Host "ACTIVE DB: (none specified) — verifying all environments." -ForegroundColor Cyan
+}
+
+# --- Rebuild flow ---
+if ($Rebuild) {
+    $dbPath = $map[$Rebuild]
     Write-Host "`n*** REBUILD REQUESTED for environment: $Rebuild ***" -ForegroundColor Yellow
 
-    # --- Safety checks ---
     if ($Rebuild -eq "production") {
-        $confirm1 = Read-Host "WARNING: Are you sure you want to rebuild PRODUCTION? (yes/no)"
-        if ($confirm1 -ne "yes") {
-            Write-Host "Aborted: rebuild cancelled." -ForegroundColor Red
-            exit 0
-        }
-        $confirm2 = Read-Host "Has the production database been backed up? (yes/no)"
-        if ($confirm2 -ne "yes") {
-            Write-Host "Aborted: please back up production before rebuilding." -ForegroundColor Red
-            exit 0
-        }
+        $c1 = Read-Host "WARNING: rebuild PRODUCTION? (yes/no)"
+        if ($c1 -ne "yes") { Write-Host "Aborted." -ForegroundColor Red; exit 0 }
+        $c2 = Read-Host "Has production DB been backed up? (yes/no)"
+        if ($c2 -ne "yes") { Write-Host "Aborted." -ForegroundColor Red; exit 0 }
     }
 
-    # --- Backup first ---
-    Backup-Database $Rebuild $path
+    Backup-Database $Rebuild $dbPath
 
-    # --- Delete and rebuild ---
-    if (Test-Path $path) {
-        Remove-Item $path -Force
-        Write-Host "Deleted existing $Rebuild database."
+    if (Test-Path $dbPath) {
+        Remove-Item $dbPath -Force
+        Write-Host "Deleted existing $Rebuild database." -ForegroundColor Yellow
         Write-MaintenanceLog "Deleted existing database for $Rebuild"
     }
-    New-Database $Rebuild $path
-    Write-MaintenanceLog "Rebuild completed for environment: $Rebuild"
+
+    New-Database $Rebuild $dbPath
     Write-Host "`nRebuild complete for $Rebuild.`n" -ForegroundColor Green
 }
 
-# --- Verification summary ---
-Write-Host ""
-Write-Host "=== Active Database Mapping (verify and initialize) ==="
-foreach ($t in $targets) {
-    $path = $map[$t]
-    $exists = Test-Path $path
-    if (-not $exists) {
-        Write-Host ("{0,-12} -> {1,-65} creating new database..." -f $t.ToUpper(), $path)
-        New-Database $t $path
+# --- Verification ---
+Write-Host "`n=== Database Verification ===" -ForegroundColor Cyan
+foreach ($t in $targetsToCheck) {
+    $dbPath = $map[$t]
+    if (-not (Test-Path $dbPath)) {
+        Write-Host ("{0,-12} -> {1}  (missing; creating...)" -f $t.ToUpper(), $dbPath) -ForegroundColor Yellow
+        New-Database $t $dbPath
     } else {
-        Write-Host ("{0,-12} -> {1,-65} exists" -f $t.ToUpper(), $path)
+        Write-Host ("{0,-12} -> {1}  (exists)" -f $t.ToUpper(), $dbPath) -ForegroundColor Green
     }
 }
-Write-Host "======================================================="
+Write-Host "============================" -ForegroundColor Cyan
 Write-Host ""

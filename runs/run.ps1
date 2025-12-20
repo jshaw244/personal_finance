@@ -38,16 +38,18 @@ $BackupKeep = 10
 # -------------------------------------------------------------------
 $ProjectRoot  = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $ProjectRoot
+
 $dbMap = @{
     "sandbox"     = "plaid.db"
     "development" = "plaid_dev.db"
     "production"  = "plaid_prod.db"
 }
+
 $logDir        = Join-Path $ProjectRoot "logs"
 $dataDir       = Join-Path $ProjectRoot "data"
 $schemaFile    = Join-Path $ProjectRoot "src\storage\schema.sql"
-$dbFileName = $dbMap[$Target]
-$dbFile     = Join-Path $dataDir $dbFileName
+$dbFileName    = $dbMap[$Target]
+$dbFile        = Join-Path $dataDir $dbFileName
 $backupDir     = Join-Path $ProjectRoot "backups"
 $WatcherScript = Join-Path $ProjectRoot "runs\automation\watch_schema.ps1"
 
@@ -60,14 +62,31 @@ $port = $portMap[$Target]
 
 Write-Host "`n=== Starting $Target environment ===" -ForegroundColor Cyan
 Write-Host "Project Root: $ProjectRoot"
-Write-Host "Data Dir:     $dataDir"
+Write-Host "DB File:      $dbFile"
 Write-Host "Port:         $port`n"
 
-# --- Verify active database ---
+# -------------------------------------------------------------------
+# Verify active database (uses schema.sql)
+# -------------------------------------------------------------------
 $verifyScript = Join-Path $ProjectRoot "scripts\verify_active_db.ps1"
+
+function Invoke-PowerShellFile {
+    param(
+        [string]$File,
+        [string[]]$Args
+    )
+
+    # Prefer PowerShell 7 if available
+    $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
+
+    & $shell -NoProfile -ExecutionPolicy Bypass -File $File @Args
+}
+
 if (Test-Path $verifyScript) {
     Write-Host "Verifying active database state..."
-    & powershell -ExecutionPolicy Bypass -File $verifyScript -Target $Target
+    $env:ENV_TARGET = $Target
+
+    Invoke-PowerShellFile -File $verifyScript -Args @("-Target", $Target)
     Write-Host "Database verification complete.`n"
 } else {
     Write-Host "Warning: verify_active_db.ps1 not found." -ForegroundColor Yellow
@@ -77,33 +96,35 @@ if (Test-Path $verifyScript) {
 # Maintenance shell
 # -------------------------------------------------------------------
 if ($Maintenance) {
- Write-Host "Entering maintenance mode..." -ForegroundColor Cyan
- if (-not (Test-Path ".\.venv")) {
-     Write-Host "Creating virtual environment..." -ForegroundColor Yellow
-     python -m venv .venv
- }
+    Write-Host "Entering maintenance mode..." -ForegroundColor Cyan
+    if (-not (Test-Path ".\.venv")) {
+        Write-Host "Creating virtual environment..." -ForegroundColor Yellow
+        python -m venv .venv
+    }
 
- . .\.venv\Scripts\Activate.ps1
- $env:ENV_TARGET     = $Target
- $env:PYTHONPATH     = $ProjectRoot
- $env:PLAID_ENV      = $Target
- $env:FLASK_RUN_PORT = $port
- Write-Host "`nMaintenance shell ready.`n" -ForegroundColor Green
+    . .\.venv\Scripts\Activate.ps1
 
- powershell -NoExit -Command "
-     . .\.venv\Scripts\Activate.ps1;
-     `$env:ENV_TARGET     = '$Target';
-     `$env:PYTHONPATH     = (Get-Location).Path;
-     `$env:PLAID_ENV      = '$Target';
-     `$env:FLASK_RUN_PORT = '$port';
-     Write-Host \"`nMaintenance shell active.`n\" -ForegroundColor Green;
- "
+    $env:ENV_TARGET     = $Target
+    $env:PLAID_ENV      = $Target
+    $env:FLASK_RUN_PORT = $port
+    $env:PYTHONPATH     = $ProjectRoot
 
- exit 0
+    Write-Host "`nMaintenance shell ready.`n" -ForegroundColor Green
+
+    pwsh -NoExit -NoProfile -Command "
+        . .\.venv\Scripts\Activate.ps1;
+        `$env:ENV_TARGET     = '$Target';
+        `$env:PLAID_ENV      = '$Target';
+        `$env:FLASK_RUN_PORT = '$port';
+        `$env:PYTHONPATH     = (Get-Location).Path;
+        Write-Host '`nMaintenance shell active.`n' -ForegroundColor Green;
+    "
+
+    exit 0
 }
 
 # -------------------------------------------------------------------
-# NEW: Auto-cleanup for stale Flask/ngrok processes
+# Auto-cleanup stale Flask/ngrok on reserved ports
 # -------------------------------------------------------------------
 Write-Host "Checking for conflicting Flask/ngrok processes..." -ForegroundColor Cyan
 foreach ($envName in $portMap.Keys) {
@@ -125,11 +146,10 @@ Write-Host "All Flask/ngrok conflicts cleared. Ports 5000–5002 free." -Foregro
 # -------------------------------------------------------------------
 # Environment setup
 # -------------------------------------------------------------------
-$env:ENV_TARGET = $Target
-$env:PYTHONPATH = $ProjectRoot
-$env:PLAID_ENV = $Target
+$env:ENV_TARGET     = $Target
+$env:PLAID_ENV      = $Target
 $env:FLASK_RUN_PORT = $port
-
+$env:PYTHONPATH     = $ProjectRoot
 
 python --version | Out-Null
 if (-not (Test-Path ".\.venv")) {
@@ -143,7 +163,7 @@ if (-not (Test-Path ".\src\requirements.txt")) {
 }
 
 # -------------------------------------------------------------------
-# Backup database & schema
+# Backup database & schema (per-env naming)
 # -------------------------------------------------------------------
 if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Force -Path $backupDir | Out-Null }
 
@@ -155,17 +175,22 @@ function Rotate-Backups {
     }
 }
 
+$ts = Get-Date -Format "yyyyMMdd_HHmm"
+
 if (Test-Path $dbFile) {
-    $bfile = Join-Path $backupDir ("plaid_" + (Get-Date -Format "yyyyMMdd_HHmm") + ".db")
-    Copy-Item $dbFile $bfile
+    $bfile = Join-Path $backupDir ("${Target}_${ts}.db")
+    Copy-Item $dbFile $bfile -Force
     Write-Host "Database backed up: $bfile"
-    Rotate-Backups -backupDir $backupDir -pattern "plaid_*.db"
+    Rotate-Backups -backupDir $backupDir -pattern "${Target}_*.db" -keep $BackupKeep
+} else {
+    Write-Host "DB file not found yet (will be created by schema/init_db): $dbFile" -ForegroundColor Yellow
 }
+
 if (Test-Path $schemaFile) {
-    $sfile = Join-Path $backupDir ("schema_" + (Get-Date -Format "yyyyMMdd_HHmm") + ".sql")
-    Copy-Item $schemaFile $sfile
+    $sfile = Join-Path $backupDir ("schema_${ts}.sql")
+    Copy-Item $schemaFile $sfile -Force
     Write-Host "Schema backed up: $sfile"
-    Rotate-Backups -backupDir $backupDir -pattern "schema_*.sql"
+    Rotate-Backups -backupDir $backupDir -pattern "schema_*.sql" -keep $BackupKeep
 }
 
 # -------------------------------------------------------------------
@@ -208,10 +233,10 @@ $flaskCmd = @"
 [Console]::Title = '$flaskTitle';
 `$Host.UI.RawUI.WindowTitle = '$flaskTitle';
 . .\.venv\Scripts\Activate.ps1;
-`$env:ENV_TARGET = '$Target';
-`$env:PLAID_ENV = '$Target';
-`$env:PYTHONPATH = '$ProjectRoot';
+`$env:ENV_TARGET     = '$Target';
+`$env:PLAID_ENV      = '$Target';
 `$env:FLASK_RUN_PORT = '$port';
+`$env:PYTHONPATH     = '$ProjectRoot';
 python -m src.ingestion.app
 "@
 Start-Process pwsh -ArgumentList "-NoExit", "-Command", $flaskCmd
@@ -227,10 +252,10 @@ $debugScript = Join-Path $env:TEMP "debug_terminal.ps1"
 @"
 cd "$ProjectRoot"
 . .\.venv\Scripts\Activate.ps1
-`$env:ENV_TARGET = '$Target'
-`$env:PLAID_ENV  = '$Target'
+`$env:ENV_TARGET     = '$Target'
+`$env:PLAID_ENV      = '$Target'
 `$env:FLASK_RUN_PORT = '$port'
-`$env:PYTHONPATH = (Get-Location).Path
+`$env:PYTHONPATH     = (Get-Location).Path
 Write-Host "Debug terminal ready for environment: $Target"
 python -m src.ingestion.debug_db schema
 python -m src.ingestion.debug_db logs 20
@@ -245,9 +270,11 @@ if ($IncludeAnalysis) {
     $runAnalysis = Join-Path $ProjectRoot "scripts\run_analysis.ps1"
     if (Test-Path $runAnalysis) {
         $args = @("-Target", $Target, "-Days", $AnalysisDays)
-        if ($AnalysisStart -and $AnalysisEnd) { $args = @("-Target", $Target, "-Start", $AnalysisStart, "-End", $AnalysisEnd) }
+        if ($AnalysisStart -and $AnalysisEnd) {
+            $args = @("-Target", $Target, "-Start", $AnalysisStart, "-End", $AnalysisEnd)
+        }
         Write-Host "Running analysis..."
-        & powershell -ExecutionPolicy Bypass -File $runAnalysis @args
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File $runAnalysis @args
     } else {
         Write-Host "run_analysis.ps1 not found. Skipping analysis."
     }
@@ -255,4 +282,3 @@ if ($IncludeAnalysis) {
 
 Write-Host "`n=== $Target environment startup complete ===" -ForegroundColor Cyan
 Write-Host "Close Flask/Watcher windows manually when finished (auto-cleanup handled on next run)." -ForegroundColor DarkGray
-#>
