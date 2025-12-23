@@ -28,10 +28,13 @@ CREATE INDEX IF NOT EXISTS idx_plaid_raw_captured_at ON plaid_raw(captured_at);
 CREATE TABLE IF NOT EXISTS items (
     item_id       TEXT PRIMARY KEY,
     access_token  TEXT NOT NULL,
-    institution   TEXT,
+    institution_id TEXT,
+    institution_name TEXT,
     created_at    TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_items_institution_id ON items(institution_id);
 
 ---------------------------------------------------------------
 -- Accounts table (Option 2 - ACTIVE)
@@ -100,6 +103,16 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_transactions_item_id ON transactions(item_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+
+CREATE TABLE IF NOT EXISTS transactions_removed (
+  transaction_id TEXT PRIMARY KEY,
+  item_id        TEXT NOT NULL,
+  removed_at     TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (item_id) REFERENCES items(item_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_removed_item_id
+ON transactions_removed(item_id);
 
 ---------------------------------------------------------------
 -- Webhook events table (audit/debug)

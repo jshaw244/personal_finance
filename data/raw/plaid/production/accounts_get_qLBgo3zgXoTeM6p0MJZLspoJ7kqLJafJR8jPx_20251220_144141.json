@@ -1,0 +1,57 @@
+{
+  "accounts": [
+    {
+      "account_id": "vBAEOvzEaOSZMqoxMX0zUJ96mo9PPAID8JN75",
+      "balances": {
+        "available": 211.96,
+        "current": 211.96,
+        "limit": null,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "4999",
+      "name": "Emergency Liquid Savings",
+      "official_name": "FIFTH THIRD MOMENTUM SAVINGS",
+      "type": "depository",
+      "subtype": "savings"
+    },
+    {
+      "account_id": "ALrRKQjRaKT3xDaVxb9quOpzn8pqqLTJ95gB1",
+      "balances": {
+        "available": 1580.59,
+        "current": 1720.59,
+        "limit": null,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "5175",
+      "name": "FIFTH THIRD MOMENTUM CHECKING",
+      "official_name": "FIFTH THIRD MOMENTUM CHECKING",
+      "type": "depository",
+      "subtype": "checking"
+    }
+  ],
+  "item": {
+    "item_id": "qLBgo3zgXoTeM6p0MJZLspoJ7kqLJafJR8jPx",
+    "webhook": "",
+    "error": null,
+    "available_products": [
+      "liabilities",
+      "recurring_transactions"
+    ],
+    "billed_products": [
+      "transactions"
+    ],
+    "consent_expiration_time": null,
+    "update_type": "background",
+    "consented_products": [
+      "transactions"
+    ],
+    "institution_id": "ins_26",
+    "institution_name": "Fifth Third Bank",
+    "products": [
+      "transactions"
+    ]
+  },
+  "request_id": "5RGyXAzpSaEuTLV"
+}
