@@ -229,6 +229,10 @@ if (Get-Command ngrok -ErrorAction SilentlyContinue) {
 # Start Flask
 # -------------------------------------------------------------------
 $flaskTitle = "personal_finance [$Target] - Flask App"
+
+# Capture webhook URL (may be $null)
+$webhookUrl = $env:PLAID_WEBHOOK_URL
+
 $flaskCmd = @"
 [Console]::Title = '$flaskTitle';
 `$Host.UI.RawUI.WindowTitle = '$flaskTitle';
@@ -237,6 +241,7 @@ $flaskCmd = @"
 `$env:PLAID_ENV      = '$Target';
 `$env:FLASK_RUN_PORT = '$port';
 `$env:PYTHONPATH     = '$ProjectRoot';
+`$env:PLAID_WEBHOOK_URL = '$webhookUrl';
 python -m src.ingestion.app
 "@
 Start-Process pwsh -ArgumentList "-NoExit", "-Command", $flaskCmd
@@ -256,6 +261,7 @@ cd "$ProjectRoot"
 `$env:PLAID_ENV      = '$Target'
 `$env:FLASK_RUN_PORT = '$port'
 `$env:PYTHONPATH     = (Get-Location).Path
+`$env:PLAID_WEBHOOK_URL = '$webhookUrl'
 Write-Host "Debug terminal ready for environment: $Target"
 python -m src.ingestion.debug_db schema
 python -m src.ingestion.debug_db logs 20

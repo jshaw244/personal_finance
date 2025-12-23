@@ -29,37 +29,6 @@ def init_db() -> None:
         _execute_schema_sql(conn)
         conn.commit()
 
-
-# -----------------------------
-# Item helpers
-# -----------------------------
-def save_item(item_id: str, access_token: str, institution: str | None = None) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("PRAGMA foreign_keys = ON;")
-        conn.execute(
-            """
-            INSERT INTO items (item_id, access_token, institution, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(item_id) DO UPDATE
-            SET access_token=excluded.access_token,
-                institution=excluded.institution,
-                updated_at=CURRENT_TIMESTAMP
-            """,
-            (item_id, access_token, institution),
-        )
-        conn.commit()
-
-
-def get_all_items() -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("PRAGMA foreign_keys = ON;")
-        cur = conn.execute(
-            "SELECT item_id, access_token, institution FROM items ORDER BY created_at;"
-        )
-        rows = cur.fetchall()
-        return [{"item_id": r[0], "access_token": r[1], "institution": r[2]} for r in rows]
-
-
 # -----------------------------
 # Raw payload helper
 # -----------------------------
@@ -78,9 +47,56 @@ def insert_plaid_raw(
             INSERT INTO plaid_raw (env_target, endpoint, item_id, request_id, payload_json)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (env_target, endpoint, item_id, request_id, json.dumps(payload)),
+            (env_target, endpoint, item_id, request_id, json.dumps(payload, default=str)),
         )
         conn.commit()
+
+# -----------------------------
+# Item helpers
+# -----------------------------
+def save_item(
+    item_id: str,
+    access_token: str,
+    institution_id: str | None = None,
+    institution_name: str | None = None,
+) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            """
+            INSERT INTO items (item_id, access_token, institution_id, institution_name, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(item_id) DO UPDATE
+            SET access_token=excluded.access_token,
+                institution_id=excluded.institution_id,
+                institution_name=excluded.institution_name,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (item_id, access_token, institution_id, institution_name),
+        )
+        conn.commit()
+
+
+def get_all_items() -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        cur = conn.execute(
+            """
+            SELECT item_id, access_token, institution_id, institution_name
+            FROM items
+            ORDER BY created_at;
+            """
+        )
+        rows = cur.fetchall()
+        return [
+            {
+                "item_id": r[0],
+                "access_token": r[1],
+                "institution_id": r[2],
+                "institution_name": r[3],
+            }
+            for r in rows
+        ]
 
 
 # -----------------------------
@@ -165,15 +181,16 @@ def save_accounts(item_id: str, accounts: list[dict]) -> None:
             )
 
         # Prune accounts for this item not in latest response
-        placeholders = ",".join(["?"] * len(seen_ids))
-        cur.execute(
-            f"""
-            DELETE FROM accounts
-            WHERE item_id = ?
-              AND account_id NOT IN ({placeholders})
-            """,
-            (item_id, *seen_ids),
-        )
+        if seen_ids:
+            placeholders = ",".join(["?"] * len(seen_ids))
+            cur.execute(
+                f"""
+                DELETE FROM accounts
+                WHERE item_id = ?
+                  AND account_id NOT IN ({placeholders})
+                """,
+                (item_id, *seen_ids),
+            )
 
         conn.commit()
 
@@ -192,6 +209,11 @@ def save_transactions(item_id: str, transactions: list[dict]) -> None:
         cur = conn.cursor()
 
         for t in transactions:
+            tid = t.get("transaction_id")
+            acct = t.get("account_id")
+            if not tid or not acct:
+                # Optional: log_event_db("db", "WARNING", f"Skipping txn missing ids: tid={tid} acct={acct}")
+                continue
             cur.execute(
                 """
                 INSERT INTO transactions (
@@ -225,9 +247,9 @@ def save_transactions(item_id: str, transactions: list[dict]) -> None:
                     updated_at=excluded.updated_at
                 """,
                 (
-                    t.get("transaction_id"),
+                    tid,
                     item_id,
-                    t.get("account_id"),
+                    acct,
                     t.get("date"),
                     t.get("authorized_date"),
                     t.get("name"),
@@ -239,13 +261,74 @@ def save_transactions(item_id: str, transactions: list[dict]) -> None:
                     t.get("pending_transaction_id"),
                     json.dumps(t.get("category")) if t.get("category") is not None else None,
                     t.get("payment_channel"),
-                    t.get("transaction_id"),  # created_at lookup
+                    tid,  # created_at lookup
                     now,
                     now,
                 ),
             )
 
         conn.commit()
+
+def get_transaction_cursor(item_id: str) -> str | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        cur = conn.execute(
+            "SELECT cursor FROM transaction_cursors WHERE item_id = ?",
+            (item_id,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def set_transaction_cursor(item_id: str, cursor: str) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            """
+            INSERT INTO transaction_cursors (item_id, cursor, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(item_id) DO UPDATE SET
+              cursor=excluded.cursor,
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (item_id, cursor),
+        )
+        conn.commit()
+
+
+def apply_removed_transactions(item_id: str, removed: list[dict]) -> None:
+    """
+    removed is the list from /transactions/sync response, like:
+      [{"transaction_id": "..."}]
+    """
+    if not removed:
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        cur = conn.cursor()
+
+        for r in removed:
+            tid = r.get("transaction_id")
+            if not tid:
+                continue
+
+            # delete from transactions
+            cur.execute("DELETE FROM transactions WHERE transaction_id = ?", (tid,))
+
+            # OPTIONAL: if you have transactions_removed table
+            cur.execute(
+                 """
+                 INSERT INTO transactions_removed (transaction_id, item_id, removed_at)
+                 VALUES (?, ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT(transaction_id) DO UPDATE SET
+                   item_id=excluded.item_id,
+                   removed_at=CURRENT_TIMESTAMP
+                 """,
+                 (tid, item_id),
+             )
+
+        conn.commit()        
 
 
 # -----------------------------
@@ -262,3 +345,84 @@ def log_event_db(source: str, level: str, message: str) -> None:
             (datetime.utcnow().isoformat(sep=" ", timespec="seconds"), source, level, message),
         )
         conn.commit()
+
+def get_accounts_canonical(item_id: str | None = None) -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+
+        if item_id:
+            rows = conn.execute(
+                """
+                SELECT
+                    a.*,
+                    i.institution_id,
+                    i.institution_name
+                FROM accounts a
+                JOIN items i ON i.item_id = a.item_id
+                WHERE a.item_id = ?
+                ORDER BY i.institution_name, a.type, a.subtype, a.name
+                """,
+                (item_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT
+                    a.*,
+                    i.institution_id,
+                    i.institution_name
+                FROM accounts a
+                JOIN items i ON i.item_id = a.item_id
+                ORDER BY i.institution_name, a.type, a.subtype, a.name
+                """
+            ).fetchall()
+
+        return [dict(r) for r in rows]
+
+# -----------------------------
+# canonical “read” helpers
+# -----------------------------
+def get_transactions_canonical(
+    days: int = 30,
+    item_id: str | None = None,
+    account_id: str | None = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+
+        where = ["t.date >= date('now', ?)"]
+        params: list[Any] = [f"-{int(days)} day"]
+
+        if item_id:
+            where.append("t.item_id = ?")
+            params.append(item_id)
+
+        if account_id:
+            where.append("t.account_id = ?")
+            params.append(account_id)
+
+        params.extend([int(limit), int(offset)])
+
+        sql = f"""
+            SELECT
+                t.*,
+                i.institution_id,
+                i.institution_name,
+                a.name AS account_name,
+                a.type AS account_type,
+                a.subtype AS account_subtype
+            FROM transactions t
+            JOIN items i ON i.item_id = t.item_id
+            JOIN accounts a ON a.account_id = t.account_id
+            WHERE {" AND ".join(where)}
+            ORDER BY t.date DESC
+            LIMIT ? OFFSET ?
+        """
+
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
