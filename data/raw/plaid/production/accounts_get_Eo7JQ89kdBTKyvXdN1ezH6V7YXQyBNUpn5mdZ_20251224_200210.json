@@ -1,0 +1,41 @@
+{
+  "accounts": [
+    {
+      "account_id": "o6R1adQ0r9iNpDzjQ7dPcPKrZ3gq3pC4QZedw",
+      "balances": {
+        "available": 1733.0,
+        "current": 2566.17,
+        "limit": 4300.0,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "1494",
+      "name": "My Best Buy® Visa® Card",
+      "official_name": "My Best Buy® Visa® Card",
+      "type": "credit",
+      "subtype": "credit card"
+    }
+  ],
+  "item": {
+    "item_id": "Eo7JQ89kdBTKyvXdN1ezH6V7YXQyBNUpn5mdZ",
+    "webhook": "https://YOUR_PROD_DOMAIN/plaid/webhook",
+    "error": null,
+    "available_products": [
+      "liabilities"
+    ],
+    "billed_products": [
+      "transactions"
+    ],
+    "consent_expiration_time": "2026-12-25 02:01:49+00:00",
+    "update_type": "background",
+    "consented_products": [
+      "transactions"
+    ],
+    "institution_id": "ins_116243",
+    "institution_name": "Best Buy - Citi Card",
+    "products": [
+      "transactions"
+    ]
+  },
+  "request_id": "jkSDVHrYH4wp1uS"
+}

@@ -1,0 +1,42 @@
+{
+  "accounts": [
+    {
+      "account_id": "7jbo69xbXZH63LPBmDx5S5PoXRRn3Dh8PkY44",
+      "balances": {
+        "available": 0.0,
+        "current": 3246.57,
+        "limit": 0.0,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "1004",
+      "name": "American Express Gold Card",
+      "official_name": "American Express Gold Card",
+      "type": "credit",
+      "subtype": "credit card"
+    }
+  ],
+  "item": {
+    "item_id": "z1p4PmapbZHqpJ9L51NwSk5JPY68VDuOADvoD",
+    "webhook": "https://YOUR_PROD_DOMAIN/plaid/webhook",
+    "error": null,
+    "available_products": [
+      "liabilities",
+      "recurring_transactions"
+    ],
+    "billed_products": [
+      "transactions"
+    ],
+    "consent_expiration_time": "2026-12-25 16:28:48+00:00",
+    "update_type": "background",
+    "consented_products": [
+      "transactions"
+    ],
+    "institution_id": "ins_10",
+    "institution_name": "American Express",
+    "products": [
+      "transactions"
+    ]
+  },
+  "request_id": "lkBrz23lsz67ksi"
+}

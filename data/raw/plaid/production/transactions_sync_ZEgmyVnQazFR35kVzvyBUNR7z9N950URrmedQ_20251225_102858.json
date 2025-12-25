@@ -1,0 +1,294 @@
+{
+  "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
+  "accounts": [
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "balances": {
+        "available": 4874.27,
+        "current": 5524.27,
+        "limit": null,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "5175",
+      "name": "FIFTH THIRD MOMENTUM CHECKING",
+      "official_name": "FIFTH THIRD MOMENTUM CHECKING",
+      "type": "depository",
+      "subtype": "checking"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "balances": {
+        "available": 8508.19,
+        "current": 822.81,
+        "limit": 9500.0,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "0259",
+      "name": "MASTERCARD ACCOUNT",
+      "official_name": "MASTERCARD ACCOUNT",
+      "type": "credit",
+      "subtype": "credit card"
+    }
+  ],
+  "added": [
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "account_owner": null,
+      "amount": -5338.57,
+      "authorized_date": null,
+      "authorized_datetime": null,
+      "category": null,
+      "category_id": null,
+      "check_number": null,
+      "counterparties": [
+        {
+          "name": "Allstate",
+          "type": "merchant",
+          "website": "allstate.com",
+          "logo_url": "https://plaid-merchant-logos.plaid.com/allstate_41.png",
+          "confidence_level": "VERY_HIGH",
+          "entity_id": "VjL57mqYbObQ349dDn8958V74L79d2paZMwav",
+          "phone_number": null
+        }
+      ],
+      "date": "2025-12-24",
+      "datetime": null,
+      "iso_currency_code": "USD",
+      "location": {
+        "address": null,
+        "city": null,
+        "region": null,
+        "postal_code": null,
+        "country": null,
+        "lat": null,
+        "lon": null,
+        "store_number": null
+      },
+      "logo_url": "https://plaid-merchant-logos.plaid.com/allstate_41.png",
+      "merchant_entity_id": "VjL57mqYbObQ349dDn8958V74L79d2paZMwav",
+      "merchant_name": "Allstate",
+      "name": "Allstate Payroll",
+      "payment_channel": "other",
+      "payment_meta": {
+        "reference_number": null,
+        "ppd_id": null,
+        "payee": null,
+        "by_order_of": null,
+        "payer": null,
+        "payment_method": null,
+        "payment_processor": null,
+        "reason": null
+      },
+      "pending": false,
+      "pending_transaction_id": "Kjg3QX04NzSK1Mj8NLoEI00rQxQR7KfyBx4Lo",
+      "personal_finance_category": {
+        "confidence_level": "VERY_HIGH",
+        "detailed": "INCOME_WAGES",
+        "primary": "INCOME",
+        "version": "v1"
+      },
+      "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_INCOME.png",
+      "transaction_code": null,
+      "transaction_id": "D306ObB4RzhkoE89RO6QH1NmMQK0vYhzvYjBr",
+      "transaction_type": "special",
+      "unofficial_currency_code": null,
+      "website": "allstate.com"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "account_owner": null,
+      "amount": 20.0,
+      "authorized_date": null,
+      "authorized_datetime": null,
+      "category": null,
+      "category_id": null,
+      "check_number": null,
+      "counterparties": [],
+      "date": "2025-12-24",
+      "datetime": null,
+      "iso_currency_code": "USD",
+      "location": {
+        "address": null,
+        "city": null,
+        "region": null,
+        "postal_code": null,
+        "country": null,
+        "lat": null,
+        "lon": null,
+        "store_number": null
+      },
+      "logo_url": null,
+      "merchant_entity_id": null,
+      "merchant_name": null,
+      "name": "ELECTRONIC IMAGE",
+      "payment_channel": "other",
+      "payment_meta": {
+        "reference_number": null,
+        "ppd_id": null,
+        "payee": null,
+        "by_order_of": null,
+        "payer": null,
+        "payment_method": null,
+        "payment_processor": null,
+        "reason": null
+      },
+      "pending": false,
+      "pending_transaction_id": null,
+      "personal_finance_category": {
+        "confidence_level": "LOW",
+        "detailed": "GENERAL_SERVICES_OTHER_GENERAL_SERVICES",
+        "primary": "GENERAL_SERVICES",
+        "version": "v1"
+      },
+      "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_GENERAL_SERVICES.png",
+      "transaction_code": null,
+      "transaction_id": "1jrR7qPmJpSngwxOkK30sMK7V5Ez6bFoBbMLN",
+      "transaction_type": "special",
+      "unofficial_currency_code": null,
+      "website": null
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "account_owner": null,
+      "amount": 20.0,
+      "authorized_date": null,
+      "authorized_datetime": null,
+      "category": null,
+      "category_id": null,
+      "check_number": null,
+      "counterparties": [
+        {
+          "name": "OpenAI",
+          "type": "merchant",
+          "website": "openai.com",
+          "logo_url": "https://plaid-merchant-logos.plaid.com/openai_1883.png",
+          "confidence_level": "VERY_HIGH",
+          "entity_id": "KkzrJYWyrRzj1AYR650aZz5ger3590kV8nREQ",
+          "phone_number": null
+        }
+      ],
+      "date": "2025-12-25",
+      "datetime": null,
+      "iso_currency_code": "USD",
+      "location": {
+        "address": null,
+        "city": null,
+        "region": null,
+        "postal_code": null,
+        "country": null,
+        "lat": null,
+        "lon": null,
+        "store_number": null
+      },
+      "logo_url": "https://plaid-merchant-logos.plaid.com/openai_1883.png",
+      "merchant_entity_id": "KkzrJYWyrRzj1AYR650aZz5ger3590kV8nREQ",
+      "merchant_name": "OpenAI",
+      "name": "OPENAI *CHATGPT SUBSCR",
+      "payment_channel": "in store",
+      "payment_meta": {
+        "reference_number": null,
+        "ppd_id": null,
+        "payee": null,
+        "by_order_of": null,
+        "payer": null,
+        "payment_method": null,
+        "payment_processor": null,
+        "reason": null
+      },
+      "pending": true,
+      "pending_transaction_id": null,
+      "personal_finance_category": {
+        "confidence_level": "VERY_HIGH",
+        "detailed": "GENERAL_SERVICES_OTHER_GENERAL_SERVICES",
+        "primary": "GENERAL_SERVICES",
+        "version": "v1"
+      },
+      "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_GENERAL_SERVICES.png",
+      "transaction_code": null,
+      "transaction_id": "00jRQP1kOpSrbOPXam7vf0YqDP9ZweFx8e0QE",
+      "transaction_type": "unresolved",
+      "unofficial_currency_code": null,
+      "website": "openai.com"
+    }
+  ],
+  "modified": [
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "account_owner": null,
+      "amount": 149.0,
+      "authorized_date": null,
+      "authorized_datetime": null,
+      "category": null,
+      "category_id": null,
+      "check_number": null,
+      "counterparties": [
+        {
+          "name": "Sqliteviewer",
+          "type": "merchant",
+          "website": null,
+          "logo_url": null,
+          "confidence_level": "LOW",
+          "entity_id": null,
+          "phone_number": null
+        }
+      ],
+      "date": "2025-12-25",
+      "datetime": null,
+      "iso_currency_code": "USD",
+      "location": {
+        "address": null,
+        "city": null,
+        "region": null,
+        "postal_code": null,
+        "country": null,
+        "lat": null,
+        "lon": null,
+        "store_number": null
+      },
+      "logo_url": null,
+      "merchant_entity_id": null,
+      "merchant_name": "Sqliteviewer",
+      "name": "POLAR* SQLITEVIEWER",
+      "payment_channel": "in store",
+      "payment_meta": {
+        "reference_number": null,
+        "ppd_id": null,
+        "payee": null,
+        "by_order_of": null,
+        "payer": null,
+        "payment_method": null,
+        "payment_processor": null,
+        "reason": null
+      },
+      "pending": true,
+      "pending_transaction_id": null,
+      "personal_finance_category": {
+        "confidence_level": "LOW",
+        "detailed": "ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS",
+        "primary": "ENTERTAINMENT",
+        "version": "v1"
+      },
+      "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_ENTERTAINMENT.png",
+      "transaction_code": null,
+      "transaction_id": "EyjL0gm4RzudqJvnRYm1caabApABjrtdM045Y",
+      "transaction_type": "place",
+      "unofficial_currency_code": null,
+      "website": null
+    }
+  ],
+  "removed": [
+    {
+      "transaction_id": "Kjg3QX04NzSK1Mj8NLoEI00rQxQR7KfyBx4Lo",
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy"
+    },
+    {
+      "transaction_id": "Namk7VnXRzsrb9dNEJaPfxxybaPYO4UyRL4de",
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR"
+    }
+  ],
+  "next_cursor": "CAESJTAwalJRUDFrT3BTcmJPUFhhbTd2ZjBZcURQOVp3ZUZ4OGUwUUUaDAi32bPKBhDYq6GJAyIMCLfZs8oGENiroYkDKgwIt9mzygYQ2KuhiQM=",
+  "has_more": false,
+  "request_id": "u0AK8t8QQmcaVJF"
+}

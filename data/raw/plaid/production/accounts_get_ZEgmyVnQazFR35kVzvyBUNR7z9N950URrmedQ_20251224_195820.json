@@ -1,0 +1,72 @@
+{
+  "accounts": [
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "balances": {
+        "available": 8528.19,
+        "current": 822.81,
+        "limit": 9500.0,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "0259",
+      "name": "MASTERCARD ACCOUNT",
+      "official_name": "MASTERCARD ACCOUNT",
+      "type": "credit",
+      "subtype": "credit card"
+    },
+    {
+      "account_id": "PJgv3VnaRzs3zj6NmnVKHpp341P959F113kzv",
+      "balances": {
+        "available": 211.96,
+        "current": 211.96,
+        "limit": null,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "4999",
+      "name": "Emergency Liquid Savings",
+      "official_name": "FIFTH THIRD MOMENTUM SAVINGS",
+      "type": "depository",
+      "subtype": "savings"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "balances": {
+        "available": 5544.27,
+        "current": 205.7,
+        "limit": null,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "5175",
+      "name": "FIFTH THIRD MOMENTUM CHECKING",
+      "official_name": "FIFTH THIRD MOMENTUM CHECKING",
+      "type": "depository",
+      "subtype": "checking"
+    }
+  ],
+  "item": {
+    "item_id": "ZEgmyVnQazFR35kVzvyBUNR7z9N950URrmedQ",
+    "webhook": "https://YOUR_PROD_DOMAIN/plaid/webhook",
+    "error": null,
+    "available_products": [
+      "liabilities",
+      "recurring_transactions"
+    ],
+    "billed_products": [
+      "transactions"
+    ],
+    "consent_expiration_time": null,
+    "update_type": "background",
+    "consented_products": [
+      "transactions"
+    ],
+    "institution_id": "ins_26",
+    "institution_name": "Fifth Third Bank",
+    "products": [
+      "transactions"
+    ]
+  },
+  "request_id": "fDyE4Z3mTq1Tn8u"
+}

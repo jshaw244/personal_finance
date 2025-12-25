@@ -99,6 +99,17 @@ def get_all_items() -> list[dict[str, Any]]:
         ]
 
 
+def count_items_by_institution(institution_id: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM items WHERE institution_id = ?",
+            (institution_id,),
+        )
+        return int(cur.fetchone()[0])
+
+
+
 # -----------------------------
 # Account helpers (Option 2)
 # -----------------------------
@@ -328,7 +339,34 @@ def apply_removed_transactions(item_id: str, removed: list[dict]) -> None:
                  (tid, item_id),
              )
 
-        conn.commit()        
+        conn.commit()
+
+
+def count_transactions_canonical(
+    days: int = 30,
+    item_id: str | None = None,
+    account_id: str | None = None,
+) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+
+        where = ["t.date >= date('now', ?)"]
+        params: list[Any] = [f"-{int(days)} day"]
+
+        if item_id:
+            where.append("t.item_id = ?")
+            params.append(item_id)
+
+        if account_id:
+            where.append("t.account_id = ?")
+            params.append(account_id)
+
+        sql = f"""
+            SELECT COUNT(*)
+            FROM transactions t
+            WHERE {" AND ".join(where)}
+        """
+        return int(conn.execute(sql, params).fetchone()[0])
 
 
 # -----------------------------
@@ -346,6 +384,9 @@ def log_event_db(source: str, level: str, message: str) -> None:
         )
         conn.commit()
 
+# -----------------------------
+# canonical “read” helpers
+# -----------------------------
 def get_accounts_canonical(item_id: str | None = None) -> list[dict[str, Any]]:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
@@ -380,9 +421,7 @@ def get_accounts_canonical(item_id: str | None = None) -> list[dict[str, Any]]:
 
         return [dict(r) for r in rows]
 
-# -----------------------------
-# canonical “read” helpers
-# -----------------------------
+
 def get_transactions_canonical(
     days: int = 30,
     item_id: str | None = None,
@@ -425,4 +464,42 @@ def get_transactions_canonical(
 
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+# -----------------------------
+# Cascade delete local data for item
+# -----------------------------
+def delete_item_local(item_id: str) -> None:
+    """
+    Delete all local rows related to a Plaid item_id.
+    Order matters if FK constraints exist.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        cur = conn.cursor()
+
+        # Delete child rows first
+        cur.execute("DELETE FROM transactions_removed WHERE item_id = ?", (item_id,))
+        cur.execute("DELETE FROM transactions WHERE item_id = ?", (item_id,))
+        cur.execute("DELETE FROM accounts WHERE item_id = ?", (item_id,))
+        cur.execute("DELETE FROM transaction_cursors WHERE item_id = ?", (item_id,))
+
+        # Finally delete the item itself
+        cur.execute("DELETE FROM items WHERE item_id = ?", (item_id,))
+
+        conn.commit()
+
+
+def get_item_by_id(item_id: str) -> dict | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT item_id, access_token, institution_id, institution_name
+            FROM items
+            WHERE item_id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        return dict(row) if row else None
 
