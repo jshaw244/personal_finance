@@ -19,26 +19,36 @@ C:.
 │
 ├───backups
 │       development_plaid_20251019_1450.db
-│       plaid_20251019_1519.db
-│       plaid_20251019_2014.db
-│       plaid_20251019_2109.db
-│       plaid_20251019_2232.db
-│       plaid_20251019_2249.db
-│       plaid_20251026_2229.db
-│       plaid_20251109_1419.db
-│       plaid_20251109_1529.db
-│       plaid_20251109_1550.db
-│       plaid_20251109_1619.db
-│       schema_20251012_1656.sql
-│       schema_20251012_1657.sql
-│       schema_20251012_1703.sql
-│       schema_20251012_1728.sql
-│       schema_20251012_1730.sql
-│       schema_20251012_1734.sql
-│       schema_20251012_1753.sql
-│       schema_20251012_2215.sql
-│       schema_20251012_2233.sql
-│       schema_20251013_1248.sql
+│       plaid_20251207_1511.db
+│       plaid_20251207_2055.db
+│       plaid_20251207_2057.db
+│       plaid_20251207_2102.db
+│       plaid_20251219_1514.db
+│       plaid_20251219_1822.db
+│       plaid_production_20251219_2123.db
+│       plaid_production_20251219_2125.db
+│       plaid_production_20251219_2130.db
+│       plaid_production_PRE_RESET_20251219_2059.db
+│       production_20251220_1629.db
+│       production_20251220_1639.db
+│       production_20251221_0043.db
+│       production_20251221_0809.db
+│       production_20251221_0817.db
+│       production_20251221_0904.db
+│       production_20251221_0920.db
+│       production_20251221_1749.db
+│       production_20251221_1754.db
+│       production_20251222_1842.db
+│       schema_20251220_1611.sql
+│       schema_20251220_1629.sql
+│       schema_20251220_1630.sql
+│       schema_20251220_1639.sql
+│       schema_20251221_0043.sql
+│       schema_20251221_0809.sql
+│       schema_20251221_0817.sql
+│       schema_20251221_0904.sql
+│       schema_20251221_0920.sql
+│       schema_20251221_1749.sql
 │
 ├───config
 │   └───env
@@ -56,10 +66,53 @@ C:.
 │   │   plaid_prod.db
 │   │
 │   ├───processed
-│   │       .gitkeep
-│   │
+│   │   │   .gitkeep
+│   │   │
+│   │   └───plaid
+│   │       └───production
 │   └───raw
-│           .gitkeep
+│       │   .gitkeep
+│       │
+│       └───plaid
+│           └───production
+│                   accounts_get_1BqPL0nQoxtK8z3rBNxpUgm3Zn93Zbum5OEzj_20251221_100754.json
+│                   accounts_get_1BqPL0nQoxtK8z3rBNxpUgm3Zn93Zbum5OEzj_20251221_103929.json
+│                   accounts_get_1BqPL0nQoxtK8z3rBNxpUgm3Zn93Zbum5OEzj_20251221_175642.json
+│                   accounts_get_1BqPL0nQoxtK8z3rBNxpUgm3Zn93Zbum5OEzj_20251222_184550.json
+│                   accounts_get_8rA1J0zBL4TNaPBKqkQxUo1Nz9JD0nCyy1YQM_20251221_175641.json
+│                   accounts_get_8rA1J0zBL4TNaPBKqkQxUo1Nz9JD0nCyy1YQM_20251221_175642.json
+│                   accounts_get_8rA1J0zBL4TNaPBKqkQxUo1Nz9JD0nCyy1YQM_20251222_184550.json
+│                   accounts_get_akbR3O3Yb9C7K9Qbo3jvSLQwzwrQ30fZE71OM_20251221_004439.json
+│                   accounts_get_akbR3O3Yb9C7K9Qbo3jvSLQwzwrQ30fZE71OM_20251221_004441.json
+│                   accounts_get_akbR3O3Yb9C7K9Qbo3jvSLQwzwrQ30fZE71OM_20251221_175642.json
+│                   accounts_get_akbR3O3Yb9C7K9Qbo3jvSLQwzwrQ30fZE71OM_20251222_184550.json
+│                   accounts_get_kQVLkkXdyvh4X8A0JRMAikxwrx96yqTR4yemd_20251222_184549.json
+│                   accounts_get_kQVLkkXdyvh4X8A0JRMAikxwrx96yqTR4yemd_20251222_184550.json
+│                   accounts_get_mE5zyqkpy6f3PnmX4x53fL3ggqLKdvUMMJK3j_20251219_232006.json
+│                   accounts_get_qLBgo3zgXoTeM6p0MJZLspoJ7kqLJafJR8jPx_20251220_144141.json
+│                   accounts_get_qLBgo3zgXoTeM6p0MJZLspoJ7kqLJafJR8jPx_20251220_144608.json
+│                   accounts_get_RqkK1jgd0aCq3VzEXmxaS07rwj6LaqFyVjx0M_20251220_161333.json
+│                   accounts_get_RqkK1jgd0aCq3VzEXmxaS07rwj6LaqFyVjx0M_20251220_161346.json
+│                   accounts_get_RqkK1jgd0aCq3VzEXmxaS07rwj6LaqFyVjx0M_20251221_175641.json
+│                   accounts_get_RqkK1jgd0aCq3VzEXmxaS07rwj6LaqFyVjx0M_20251222_184549.json
+│                   accounts_get_wDkwZ98k9dsM430vMbart6rqYB5r8ofLxDk6n_20251219_234639.json
+│                   accounts_get_z4O6Vv7Oawtmp3neVjRVSK0w5q4rQ6TOMRvnX_20251220_164007.json
+│                   accounts_get_z4O6Vv7Oawtmp3neVjRVSK0w5q4rQ6TOMRvnX_20251220_164009.json
+│                   accounts_get_z4O6Vv7Oawtmp3neVjRVSK0w5q4rQ6TOMRvnX_20251221_175641.json
+│                   accounts_get_z4O6Vv7Oawtmp3neVjRVSK0w5q4rQ6TOMRvnX_20251222_184549.json
+│                   item_public_token_exchange_no_item_20251219_232006.json
+│                   item_public_token_exchange_no_item_20251219_234639.json
+│                   item_public_token_exchange_no_item_20251220_144140.json
+│                   item_public_token_exchange_no_item_20251220_161332.json
+│                   item_public_token_exchange_no_item_20251220_164007.json
+│                   item_public_token_exchange_no_item_20251221_004439.json
+│                   item_public_token_exchange_no_item_20251221_100753.json
+│                   item_public_token_exchange_no_item_20251221_175640.json
+│                   item_public_token_exchange_no_item_20251222_184548.json
+│                   transactions_get_1BqPL0nQoxtK8z3rBNxpUgm3Zn93Zbum5OEzj_20251221_104020.json
+│                   transactions_get_akbR3O3Yb9C7K9Qbo3jvSLQwzwrQ30fZE71OM_20251221_004454.json
+│                   transactions_get_qLBgo3zgXoTeM6p0MJZLspoJ7kqLJafJR8jPx_20251220_144745.json
+│                   transactions_get_RqkK1jgd0aCq3VzEXmxaS07rwj6LaqFyVjx0M_20251220_161357.json
 │
 ├───docs
 │   │   New Text Document.txt
@@ -84,24 +137,29 @@ C:.
 │           README.md
 │
 ├───logs
-│       .gitkeep
-│       app.log
-│       db_snapshot_sanitizer.log
-│       maintenance.log
-│       sanitizer.log
-│       schema_watcher.log
-│       session_snapshot.yaml
-│       session_snapshot_20251026_2220.yaml
-│       session_snapshot_20251026_2231.yaml
-│       session_snapshot_20251026_2243.yaml
-│       session_snapshot_20251027_2237.yaml
-│       session_snapshot_20251109_1429.yaml
-│       session_snapshot_20251126_2130.yaml
-│       session_snapshot_20251126_2133.yaml
-│       session_snapshot_20251127_1027.yaml
-│       session_snapshot_20251127_2239.yaml
-│       session_snapshot_20251129_1445.yaml
-│       webhook.log
+│   │   .gitkeep
+│   │   app.log
+│   │   db_snapshot_sanitizer.log
+│   │   maintenance.log
+│   │   sanitizer.log
+│   │   schema_watcher.log
+│   │   session_snapshot.yaml
+│   │   session_snapshot_20251129_1445.yaml
+│   │   session_snapshot_20251130_1324.yaml
+│   │   session_snapshot_20251130_1332.yaml
+│   │   session_snapshot_20251130_1340.yaml
+│   │   session_snapshot_20251206_2215.yaml
+│   │   session_snapshot_20251206_2234.yaml
+│   │   session_snapshot_20251206_2309.yaml
+│   │   session_snapshot_20251207_2202.yaml
+│   │   session_snapshot_20251220_0001.yaml
+│   │   session_snapshot_20251222_1856.yaml
+│   │   test_session_snapshot_20251130_1351.yaml
+│   │   webhook.log
+│   │
+│   └───raw_plaid
+│           accounts_get_zMVJox18qNUN4dV78NaeCeNb5Vkp3DTOvpJ8R_20251219_182602.json
+│           item_public_token_exchange_no_item_20251219_182602.json
 │
 ├───maintenance
 │       sandbox_baseline_20251018.ps1
@@ -146,7 +204,10 @@ C:.
 │           sandbox_top_merchants.png
 │
 ├───runs
-│       run.ps1
+│   │   run.ps1
+│   │
+│   └───archive
+│           run.ps1
 │
 ├───scripts
 │   │   check_indexes.py
@@ -160,6 +221,7 @@ C:.
 │   │   create_dev_prod_dbs.ps1
 │   │   create_docs_structure.ps1
 │   │   db_explorer.py
+│   │   dedupe_transactions.py
 │   │   ensure_prod_view.ps1
 │   │   explore_transactions.py
 │   │   export_db_snapshot.ps1
@@ -168,11 +230,13 @@ C:.
 │   │   generate_password_hash.py
 │   │   generate_qa_snapshot.py
 │   │   generate_summary_tables.py
+│   │   init_db.py
 │   │   inspect_active_db_users.py
 │   │   inspect_db.py
 │   │   inspect_snapshot_db_state.py
 │   │   inspect_users.ps1
 │   │   Install-PlaidProfileShortcuts.ps1
+│   │   layout_windows.ps1
 │   │   list_items.py
 │   │   list_webhook_events.py
 │   │   load-env.ps1
@@ -180,6 +244,7 @@ C:.
 │   │   migrate_add_sync_cursor.py
 │   │   migrate_items_table.py
 │   │   migrate_schema.py
+│   │   patch_accounts_columns.py
 │   │   readme.txt
 │   │   reset.ps1
 │   │   reset_personal_finance_app.ps1
@@ -188,12 +253,14 @@ C:.
 │   │   run_analysis.ps1
 │   │   run_validation.ps1
 │   │   sanitize_ps.ps1
+│   │   scratch.sql
 │   │   seed_dev_db.py
 │   │   seed_transactions.py
 │   │   setup_gitignore.ps1
 │   │   set_reports_password.ps1
 │   │   show_recent_transactions.py
 │   │   sync_schemas.ps1
+│   │   test.2025.12.19.sql
 │   │   test.sql
 │   │   test_reports_api.ps1
 │   │   test_sandbox_analysis.py
@@ -282,10 +349,6 @@ C:.
 │   │   │   schema.sql
 │   │   │   __init__.py
 │   │   │
-│   │   ├───backups
-│   │   │       .gitkeep
-│   │   │       plaid.db
-│   │   │
 │   │   └───__pycache__
 │   │           db.cpython-313.pyc
 │   │           __init__.cpython-313.pyc
@@ -293,4 +356,6 @@ C:.
 │   └───__pycache__
 │           __init__.cpython-313.pyc
 │
-└───tests
+└───test
+        make_session_snapshot.py
+        run_test.ps1

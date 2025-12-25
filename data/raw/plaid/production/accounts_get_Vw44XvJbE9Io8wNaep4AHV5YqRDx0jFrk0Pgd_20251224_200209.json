@@ -1,0 +1,42 @@
+{
+  "accounts": [
+    {
+      "account_id": "yLaa4ovAM9c8jyzMdrKYSmXBDwaPMKcgpL0Dq",
+      "balances": {
+        "available": 6497.0,
+        "current": 2.99,
+        "limit": 6500.0,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "2852",
+      "name": "Prime Store Card",
+      "official_name": "Prime Store Card",
+      "type": "credit",
+      "subtype": "credit card"
+    }
+  ],
+  "item": {
+    "item_id": "Vw44XvJbE9Io8wNaep4AHV5YqRDx0jFrk0Pgd",
+    "webhook": "https://YOUR_PROD_DOMAIN/plaid/webhook",
+    "error": null,
+    "available_products": [
+      "liabilities",
+      "recurring_transactions"
+    ],
+    "billed_products": [
+      "transactions"
+    ],
+    "consent_expiration_time": null,
+    "update_type": "background",
+    "consented_products": [
+      "transactions"
+    ],
+    "institution_id": "ins_110743",
+    "institution_name": "Amazon.com Store Card",
+    "products": [
+      "transactions"
+    ]
+  },
+  "request_id": "XcZl3cfFO7XJrML"
+}
