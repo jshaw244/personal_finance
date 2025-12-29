@@ -27,6 +27,29 @@
       #charts { margin-top: 2rem; }
       .chart { margin-bottom: 3rem; }
 
+      .day-tile{
+        background:#fff; border-radius:8px; padding:.75rem .9rem;
+        box-shadow:0 0 4px rgba(0,0,0,.05);
+        width: 180px; cursor:pointer;
+      }
+      .day-tile:hover{ outline:2px solid rgba(0,120,215,.25); }
+      .day-tile .d{ font-weight:700; }
+      .day-tile .s{ font-size:1.05rem; font-weight:700; margin-top:.25rem; }
+      .day-tile .c{ color:#666; font-size:.9rem; }
+
+      .cal-table{ border-collapse:collapse; width:100%; background:#fff; }
+      .cal-table th, .cal-table td{ border:1px solid #eee; padding:.5rem; vertical-align:top; min-width:120px; }
+      .cal-table th{ background:#f1f3f4; position:sticky; top:0; }
+      .cal-day{ font-weight:700; }
+      .cal-spend{ margin-top:.25rem; font-size:.95rem; font-weight:700; }
+      .cal-count{ color:#666; font-size:.85rem; }
+      .cal-cell{ cursor:pointer; }
+      .cal-cell:hover{ background:#f7fbff; }
+      .today-badge{ display:inline-block; padding:.1rem .35rem; border-radius:6px; background:#e8f2ff; color:#0b4f8a; font-size:.75rem; margin-left:.25rem; }
+
+      
+
+
       /* Panels */
       .panel { background:#fff; padding:1rem 1.25rem; border-radius:8px; box-shadow:0 0 4px rgba(0,0,0,.05); margin-top:2rem; }
       .panel h2 { margin-top:0; font-size:1.25rem; }
@@ -73,6 +96,26 @@
       <div class="card"><h3>Daily Allowance</h3><p id="card-allow">–</p><div class="small" id="card-allow-mode"></div></div>
     </div>
 
+    <div class="panel">
+      <h2>Spending Calendar</h2>
+      <div class="input-row">
+        <button onclick="shiftTwoWeek(-14)">← Prev 2 weeks</button>
+        <button onclick="shiftTwoWeek(14)">Next 2 weeks →</button>
+        <span class="small" id="tw-label"></span>
+      </div>
+      <div id="two-week" style="display:flex; flex-wrap:wrap; gap:0.75rem; margin-top:0.75rem;"></div>
+      <div class="input-row" style="margin-top:1.25rem;">
+        <button onclick="shiftMonth(-1)">← Prev month</button>
+        <button onclick="shiftMonth(1)">Next month →</button>
+        <span class="small" id="month-label"></span>
+      </div>
+      <div id="month-cal" style="overflow:auto;"></div>
+      <div class="small" style="margin-top:1rem;">
+        <strong id="day-detail-title"></strong>
+        <div id="day-detail"></div>
+      </div>
+    </div>
+
     {% if files %}
       <h2>All Files</h2>
       <table>
@@ -100,6 +143,23 @@
         {% endfor %}
       </div>
     {% endif %}
+
+    <div class="panel">
+      <h2>53 Checking — Pay Cycle (14 days)</h2>
+      <div class="input-row">
+        <button onclick="shiftPaycycle(-14)">← Prev</button>
+        <button onclick="shiftPaycycle(14)">Next →</button>
+        <span class="small" id="pc-label"></span>
+      </div>
+
+      <div class="row">
+        <div class="col"><h3>Income</h3><div id="pc-income"></div></div>
+        <div class="col"><h3>Fixed Expenses</h3><div id="pc-fixed"></div></div>
+        <div class="col"><h3>Variable Expenses</h3><div id="pc-variable"></div></div>
+      </div>
+
+      <div class="small" id="pc-totals" style="margin-top:.75rem;"></div>
+    </div>
 
     <div id="charts">
       <h2>Interactive Dashboard</h2>
@@ -285,6 +345,116 @@
       await loadBudget();
     }
 
+    let paycycleStart = null; // YYYY-MM-DD
+
+    function shiftPaycycle(deltaDays){
+      if (!paycycleStart){
+        paycycleStart = new Date(); // fallback
+      } else {
+        const d = new Date(paycycleStart + "T00:00:00");
+        d.setDate(d.getDate() + deltaDays);
+        paycycleStart = d.toISOString().slice(0,10);
+      }
+      loadPaycycle();
+    }
+
+    function renderTxTable(rows){
+      if (!rows || !rows.length) return `<div class="small">None</div>`;
+      let html = `<table style="width:100%; border-collapse:collapse;">
+        <tr>
+          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Date</th>
+          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Transaction</th>
+          <th style="text-align:right; border-bottom:1px solid #ddd; padding:.35rem;">Amount</th>
+        </tr>`;
+      rows.forEach(r => {
+        const label = (r.merchant && r.merchant.trim()) ? r.merchant : r.name;
+        html += `<tr>
+          <td style="padding:.3rem; border-bottom:1px solid #eee;">${r.date}</td>
+          <td style="padding:.3rem; border-bottom:1px solid #eee;">${(label||'').toString()}</td>
+          <td style="padding:.3rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
+        </tr>`;
+      });
+      html += `</table>`;
+      return html;
+    }
+
+    async function loadPaycycle(){
+      const qs = paycycleStart ? (`?start=${encodeURIComponent(paycycleStart)}&days=14`) : (`?days=14`);
+      const res = await fetchJSON('/reports/api/paycycle_53' + qs);
+
+      // server tells us the actual window
+      paycycleStart = res.start;
+      document.getElementById('pc-label').textContent = `${res.start} → ${res.end}`;
+
+      document.getElementById('pc-income').innerHTML = renderTxTable(res.income);
+      document.getElementById('pc-fixed').innerHTML = renderTxTable(res.fixed);
+      document.getElementById('pc-variable').innerHTML = renderTxTable(res.variable);
+
+      const t = res.totals || {};
+      document.getElementById('pc-totals').innerHTML =
+        `<strong>Totals</strong> — Income: $${Number(t.income||0).toFixed(2)} | ` +
+        `Fixed: $${Number(t.fixed||0).toFixed(2)} | ` +
+        `Variable: $${Number(t.variable||0).toFixed(2)} | ` +
+        `Net: $${Number(t.net||0).toFixed(2)}`;
+    }
+
+    let paycycleStart = null; // YYYY-MM-DD
+
+    function shiftPaycycle(deltaDays){
+      const d = paycycleStart ? new Date(paycycleStart + "T00:00:00") : new Date();
+      d.setDate(d.getDate() + deltaDays);
+      paycycleStart = d.toISOString().slice(0,10);
+      loadPaycycle();
+    }
+
+    function renderTxTable(rows){
+      if (!rows || !rows.length) return `<div class="small">None</div>`;
+      let html = `<table style="width:100%; border-collapse:collapse;">
+        <tr>
+          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Date</th>
+          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Transaction</th>
+          <th style="text-align:right; border-bottom:1px solid #ddd; padding:.35rem;">Amount</th>
+        </tr>`;
+      rows.forEach(r => {
+        html += `<tr>
+          <td style="padding:.3rem; border-bottom:1px solid #eee;">${r.date}</td>
+          <td style="padding:.3rem; border-bottom:1px solid #eee;">${(r.transaction||'').toString()}</td>
+          <td style="padding:.3rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
+        </tr>`;
+      });
+      html += `</table>`;
+      return html;
+    }
+
+    async function loadPaycycle(){
+      const qs = paycycleStart ? (`?start=${encodeURIComponent(paycycleStart)}&days=14`) : (`?days=14`);
+      const res = await fetchJSON('/reports/api/paycycle_53' + qs);
+
+      if (res.error){
+        document.getElementById('pc-label').textContent = res.error;
+        document.getElementById('pc-income').innerHTML = '';
+        document.getElementById('pc-fixed').innerHTML = '';
+        document.getElementById('pc-variable').innerHTML = '';
+        document.getElementById('pc-totals').textContent = '';
+        return;
+      }
+
+      paycycleStart = res.start;
+      document.getElementById('pc-label').textContent = `${res.start} → ${res.end}`;
+
+      document.getElementById('pc-income').innerHTML = renderTxTable(res.income);
+      document.getElementById('pc-fixed').innerHTML = renderTxTable(res.fixed);
+      document.getElementById('pc-variable').innerHTML = renderTxTable(res.variable);
+
+      const t = res.totals || {};
+      document.getElementById('pc-totals').innerHTML =
+        `<strong>Totals</strong> — Income: $${Number(t.income||0).toFixed(2)} | ` +
+        `Fixed: $${Number(t.fixed||0).toFixed(2)} | ` +
+        `Variable: $${Number(t.variable||0).toFixed(2)} | ` +
+        `Net: $${Number(t.net||0).toFixed(2)}`;
+    }
+
+
     // Forecast chart
     async function loadForecast() {
       const fc = await fetchJSON('/reports/api/forecast_cashflow');
@@ -348,10 +518,185 @@
       timer = setInterval(loadCharts, REFRESH_MS);
     }
 
+    let twoWeekAnchor = new Date(); // local
+    let calMonth = new Date(twoWeekAnchor.getFullYear(), twoWeekAnchor.getMonth(), 1);
+
+    function fmtYMD(d){
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function shiftTwoWeek(deltaDays){
+      twoWeekAnchor = new Date(twoWeekAnchor.getTime() + deltaDays*24*3600*1000);
+      loadTwoWeek();
+    }
+
+    function shiftMonth(delta){
+      calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth()+delta, 1);
+      loadMonth();
+    }
+
+    async function loadTwoWeek(){
+      const anchor = fmtYMD(twoWeekAnchor);
+      const data = await fetchJSON(`/reports/api/calendar_2week?anchor=${encodeURIComponent(anchor)}&days=14`);
+      const label = document.getElementById('tw-label');
+      if (Array.isArray(data) && data.length){
+        label.textContent = `${data[0].date} → ${data[data.length-1].date}`;
+      } else {
+        label.textContent = '';
+      }
+
+      const host = document.getElementById('two-week');
+      host.innerHTML = '';
+
+      (data || []).forEach(d => {
+        const div = document.createElement('div');
+        div.className = 'day-tile';
+        div.onclick = () => loadDayDetail(d.date);
+        div.innerHTML = `
+          <div class="d">${d.dow} ${d.date}</div>
+          <div class="s">$${Number(d.spend_total || 0).toFixed(2)}</div>
+          <div class="c">${d.txn_count || 0} txns</div>
+        `;
+        host.appendChild(div);
+      });
+    }
+
+    async function loadMonth(){
+      const monthKey = `${calMonth.getFullYear()}-${String(calMonth.getMonth()+1).padStart(2,'0')}`;
+      document.getElementById('month-label').textContent = monthKey;
+
+      const res = await fetchJSON(`/reports/api/calendar_month?month=${encodeURIComponent(monthKey)}`);
+      const weeks = res.weeks || [];
+
+      const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      let html = `<table class="cal-table"><tr>${dow.map(x=>`<th>${x}</th>`).join('')}</tr>`;
+
+      const todayYMD = fmtYMD(new Date());
+
+      weeks.forEach(week => {
+        html += '<tr>';
+        week.forEach(cell => {
+          if (!cell){
+            html += `<td></td>`;
+          } else {
+            const isToday = cell.date === todayYMD;
+            html += `
+              <td class="cal-cell" onclick="loadDayDetail('${cell.date}')">
+                <div class="cal-day">
+                  ${cell.day}
+                  ${isToday ? `<span class="today-badge">today</span>` : ``}
+                </div>
+                <div class="cal-spend">$${Number(cell.spend_total || 0).toFixed(2)}</div>
+                <div class="cal-count">${cell.txn_count || 0} txns</div>
+              </td>
+            `;
+          }
+        });
+        html += '</tr>';
+      });
+
+      html += '</table>';
+      document.getElementById('month-cal').innerHTML = html;
+    }
+
+    async function loadDayDetail(ymd){
+      document.getElementById('day-detail-title').textContent = `Spend detail for ${ymd}`;
+      const rows = await fetchJSON(`/reports/api/day_spend_detail?date=${encodeURIComponent(ymd)}`);
+
+      if (!Array.isArray(rows) || !rows.length){
+        document.getElementById('day-detail').innerHTML = `<div class="small">No spend transactions.</div>`;
+        return;
+      }
+
+      const top = rows.slice(0, 25);
+      let html = `<table style="width:100%; border-collapse:collapse; margin-top:.5rem;">
+        <tr>
+          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.4rem;">Merchant</th>
+          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.4rem;">Name</th>
+          <th style="text-align:right; border-bottom:1px solid #ddd; padding:.4rem;">Amount</th>
+          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.4rem;">Category</th>
+        </tr>`;
+
+      top.forEach(r => {
+        html += `<tr>
+          <td style="padding:.35rem; border-bottom:1px solid #eee;">${(r.merchant_name || '').toString()}</td>
+          <td style="padding:.35rem; border-bottom:1px solid #eee;">${(r.name || '').toString()}</td>
+          <td style="padding:.35rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
+          <td style="padding:.35rem; border-bottom:1px solid #eee;">${(r.category || '').toString()}</td>
+        </tr>`;
+      });
+
+      html += `</table>`;
+      document.getElementById('day-detail').innerHTML = html;
+    }
+
+    let paycycleStart = null; // YYYY-MM-DD
+
+function shiftPaycycle(deltaDays){
+  const d = paycycleStart ? new Date(paycycleStart + "T00:00:00") : new Date();
+  d.setDate(d.getDate() + deltaDays);
+  paycycleStart = d.toISOString().slice(0,10);
+  loadPaycycle();
+}
+
+function renderTxTable(rows){
+  if (!rows || !rows.length) return `<div class="small">None</div>`;
+  let html = `<table style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Date</th>
+      <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Transaction</th>
+      <th style="text-align:right; border-bottom:1px solid #ddd; padding:.35rem;">Amount</th>
+    </tr>`;
+  rows.forEach(r => {
+    html += `<tr>
+      <td style="padding:.3rem; border-bottom:1px solid #eee;">${r.date}</td>
+      <td style="padding:.3rem; border-bottom:1px solid #eee;">${(r.transaction||'').toString()}</td>
+      <td style="padding:.3rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
+    </tr>`;
+  });
+  html += `</table>`;
+  return html;
+}
+
+async function loadPaycycle(){
+  const qs = paycycleStart ? (`?start=${encodeURIComponent(paycycleStart)}&days=14`) : (`?days=14`);
+  const res = await fetchJSON('/reports/api/paycycle_53' + qs);
+
+  if (res.error){
+    document.getElementById('pc-label').textContent = res.error;
+    document.getElementById('pc-income').innerHTML = '';
+    document.getElementById('pc-fixed').innerHTML = '';
+    document.getElementById('pc-variable').innerHTML = '';
+    document.getElementById('pc-totals').textContent = '';
+    return;
+  }
+
+  paycycleStart = res.start;
+  document.getElementById('pc-label').textContent = `${res.start} → ${res.end}`;
+
+  document.getElementById('pc-income').innerHTML = renderTxTable(res.income);
+  document.getElementById('pc-fixed').innerHTML = renderTxTable(res.fixed);
+  document.getElementById('pc-variable').innerHTML = renderTxTable(res.variable);
+
+  const t = res.totals || {};
+  document.getElementById('pc-totals').innerHTML =
+    `<strong>Totals</strong> — Income: $${Number(t.income||0).toFixed(2)} | ` +
+    `Fixed: $${Number(t.fixed||0).toFixed(2)} | ` +
+    `Variable: $${Number(t.variable||0).toFixed(2)} | ` +
+    `Net: $${Number(t.net||0).toFixed(2)}`;
+}
+
+
     document.addEventListener('DOMContentLoaded', async () => {
+      await loadTwoWeek();
+      await loadMonth();
       await loadCharts();
       await loadBudget();
       await loadForecast();
+      await loadPaycycle();
       scheduleAutoRefresh();
       document.getElementById('range').addEventListener('change', loadCharts);
 

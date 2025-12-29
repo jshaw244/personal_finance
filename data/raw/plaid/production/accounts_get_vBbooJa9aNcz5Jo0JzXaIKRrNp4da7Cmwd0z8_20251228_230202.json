@@ -1,0 +1,43 @@
+{
+  "accounts": [
+    {
+      "account_id": "6oXBB8RgRjiMNOEgOM7VFqMO1jKEVvhp9vyM4",
+      "balances": {
+        "available": 8741.49,
+        "current": 8746.49,
+        "limit": null,
+        "iso_currency_code": "USD",
+        "unofficial_currency_code": null
+      },
+      "mask": "0000",
+      "name": "REGULAR SHARE",
+      "official_name": "REGULAR SHARE",
+      "type": "depository",
+      "subtype": "savings"
+    }
+  ],
+  "item": {
+    "item_id": "vBbooJa9aNcz5Jo0JzXaIKRrNp4da7Cmwd0z8",
+    "webhook": "https://YOUR_PROD_DOMAIN/plaid/webhook",
+    "error": null,
+    "available_products": [
+      "investments",
+      "liabilities"
+    ],
+    "billed_products": [
+      "recurring_transactions",
+      "transactions"
+    ],
+    "consent_expiration_time": null,
+    "update_type": "background",
+    "consented_products": [
+      "transactions"
+    ],
+    "institution_id": "ins_109911",
+    "institution_name": "American Airlines Credit Union",
+    "products": [
+      "transactions"
+    ]
+  },
+  "request_id": "1yJZnH9R32kBHBA"
+}

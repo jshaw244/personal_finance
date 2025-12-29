@@ -20,6 +20,8 @@ from flask_login import (
     LoginManager, UserMixin, login_user, logout_user,
     login_required, current_user
 )
+from flask import session
+#session.permanent = True
 from pathlib import Path
 from datetime import datetime, timedelta, date
 import pandas as pd
@@ -180,6 +182,17 @@ CATEGORY_KEYWORDS = {
     "Other": []
 }
 
+_FIXED_PATTERNS = [
+    r"\bauto\s*pay\b", r"\bpymt\b", r"\bpayment\b",
+    r"\bmortgage\b", r"\brent\b", r"\binsurance\b",
+    r"\bcomcast\b", r"\bxfinity\b", r"\batt\b", r"\bverizon\b",
+    r"\bnicor\b", r"\bcomed\b", r"\belectric\b", r"\bgas\s+bill\b",
+    r"\bnetflix\b", r"\bspotify\b", r"\byoutube\b", r"\bgoogle\s+one\b",
+    r"\broth\b", r"\bira\b", r"\bedward\s+jones\b", r"\bschwab\b",
+    r"\bsavings\b", r"\btax\s+savings\b",
+    r"\bchase\b.*\bcc\b", r"\bamazon\b.*\bcc\b", r"\bbest\s*buy\b.*\bcc\b",
+]
+
 def _derive_category(name: str, merchant: str) -> str:
     text = f"{name or ''} {merchant or ''}".lower()
     for cat, words in CATEGORY_KEYWORDS.items():
@@ -223,11 +236,20 @@ def _load_tx_detail() -> pd.DataFrame:
 
     if "amount" in df.columns:
         df["spending_type"] = df["amount"].apply(
-            lambda x: "income" if x > 0 else "expense"
+            lambda x: "income" if x < 0 else "expense"
         )
     else:
         df["spending_type"] = "unknown"
     return df
+
+def _load_tx_detail_db_only() -> pd.DataFrame:
+    if not DB_PATH.exists():
+        return pd.DataFrame()
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        return pd.read_sql_query("SELECT * FROM transactions;", conn)
+    finally:
+        conn.close()
 
 
 def _filter_by_range(df: pd.DataFrame, range_key: str) -> pd.DataFrame:
@@ -425,6 +447,94 @@ def api_top_merchants():
     top.columns = ["merchant", "amount"]
     return jsonify(top.to_dict(orient="records"))
 
+
+@reports_bp.route("/api/paycycle_53")
+@login_required
+def api_paycycle_53():
+    today = date.today()
+
+    start_s = (request.args.get("start") or "").strip()
+    if start_s:
+        try:
+            start = datetime.strptime(start_s, "%Y-%m-%d").date()
+        except Exception:
+            start = _paycycle_start(today)
+    else:
+        start = _paycycle_start(today)
+
+    days = int(request.args.get("days", "14"))
+    days = max(7, min(31, days))
+    end = start + timedelta(days=days - 1)
+
+    acct_id = _resolve_53_checking_account_id()
+    if not acct_id:
+        return jsonify({"error": "FIFTH_THIRD_CHECKING_ACCOUNT_ID not set"}), 400
+
+    df = _load_tx_detail_db_only()
+    if df.empty:
+        return jsonify({
+            "start": start.isoformat(), "end": end.isoformat(),
+            "account_id": acct_id,
+            "income": [], "fixed": [], "variable": [],
+            "totals": {"income": 0.0, "fixed": 0.0, "variable": 0.0, "net": 0.0}
+        })
+
+    df.columns = [c.lower() for c in df.columns]
+    if "date" not in df.columns or "amount" not in df.columns or "account_id" not in df.columns:
+        return jsonify({"error": "transactions table missing date/amount/account_id"}), 400
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    df = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)]
+    df = df[df["account_id"] == acct_id]
+
+    merch = df.get("merchant_name", pd.Series([""] * len(df))).fillna("").astype(str)
+    name = df.get("name", pd.Series([""] * len(df))).fillna("").astype(str)
+    text = (merch + " " + name).str.lower()
+
+    # Income: keywords OR Plaid credit (amount < 0)
+    is_income = text.str.contains(r"payroll|deposit|refund|reversal", regex=True, na=False) | (df["amount"].astype(float) < 0)
+    df["is_income"] = is_income
+
+    fixed_mask = pd.Series([False] * len(df), index=df.index)
+    for pat in _FIXED_PATTERNS:
+        fixed_mask = fixed_mask | text.str.contains(pat, regex=True, na=False)
+
+    def row_out(r):
+        amt = float(r.get("amount") or 0.0)
+        label = (r.get("merchant_name") or "").strip() or (r.get("name") or "").strip()
+        return {
+            "date": pd.to_datetime(r["date"]).strftime("%Y-%m-%d"),
+            "transaction": label,
+            "amount": round(abs(amt), 2),
+            "transaction_id": r.get("transaction_id"),
+        }
+
+    income_df = df[df["is_income"]].sort_values("date")
+    exp_df = df[~df["is_income"]].copy()
+    fixed_df = exp_df[fixed_mask.reindex(exp_df.index, fill_value=False)].sort_values("date")
+    var_df = exp_df[~fixed_mask.reindex(exp_df.index, fill_value=False)].sort_values("date")
+
+    income_total = float(income_df["amount"].abs().sum()) if len(income_df) else 0.0
+    fixed_total  = float(fixed_df["amount"].abs().sum()) if len(fixed_df) else 0.0
+    var_total    = float(var_df["amount"].abs().sum()) if len(var_df) else 0.0
+
+    return jsonify({
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "account_id": acct_id,
+        "income": [row_out(r) for _, r in income_df.iterrows()],
+        "fixed": [row_out(r) for _, r in fixed_df.iterrows()],
+        "variable": [row_out(r) for _, r in var_df.iterrows()],
+        "totals": {
+            "income": round(income_total, 2),
+            "fixed": round(fixed_total, 2),
+            "variable": round(var_total, 2),
+            "net": round(income_total - (fixed_total + var_total), 2),
+        }
+    })
+
+
 # -------------------- KPI / Cashflow / Recurring / Top Tx --------------------
 @reports_bp.route("/api/kpi_summary")
 @login_required
@@ -576,8 +686,11 @@ def api_recurring_merchants():
         return jsonify([])
 
     #logging
-    current_app.logger.info("Recurring merchant scan: %d txns across %d merchants", len(df), df["merchant_name"].nunique())
-
+    current_app.logger.info(
+        "Recurring merchant scan: %d txns across %d merchants",
+        len(df),
+        df[merchant_col].nunique()
+    )
     # Parameterized thresholds
     try:
         min_occ = int(request.args.get("min_occurrences", "3"))
@@ -678,6 +791,226 @@ def api_healthcheck():
         "latest_file": latest.name if latest else None,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     })
+
+
+
+# -------------------------------------------------------------------
+# Calendar / 2-week Spend Endpoints
+# -------------------------------------------------------------------
+
+def _paycycle_start(today: date) -> date:
+    """
+    Compute the most recent payday <= today using an anchor + cycle length.
+    Falls back to "most recent Friday" if no anchor is set.
+    """
+    anchor_s = (os.getenv("PAYDAY_ANCHOR_DATE") or "").strip()
+    cycle_days = int(os.getenv("PAYDAY_CYCLE_DAYS", "14"))
+    payday_weekday = int(os.getenv("PAYDAY_WEEKDAY", "4"))  # Friday
+
+    if anchor_s:
+        try:
+            anchor = datetime.strptime(anchor_s, "%Y-%m-%d").date()
+            if today < anchor:
+                # walk back by whole cycles until <= today
+                while today < anchor:
+                    anchor = anchor - timedelta(days=cycle_days)
+                return anchor
+            delta = (today - anchor).days
+            return anchor + timedelta(days=(delta // cycle_days) * cycle_days)
+        except Exception:
+            pass
+
+    # fallback: last payday_weekday (default Friday)
+    offset = (today.weekday() - payday_weekday) % 7
+    return today - timedelta(days=offset)
+
+
+def _spend_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Spend rows = outflows only.
+    Uses your existing "is_income" heuristic and requires amount > 0.
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    if "date" not in df.columns or "amount" not in df.columns:
+        return pd.DataFrame()
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+
+    # your existing income-like heuristic (keep consistent with KPIs)
+    merch = df.get("merchant_name", pd.Series([""] * len(df))).fillna("").astype(str)
+    name = df.get("name", pd.Series([""] * len(df))).fillna("").astype(str)
+    text = (merch + " " + name)
+
+    df["is_income"] = text.str.contains(
+        r"payroll|deposit|refund|credit|reversal",
+        case=False,
+        na=False
+    )
+
+    # IMPORTANT: spend = outflow transactions, amount > 0
+    df = df[df["amount"].notna()]
+    df = df[(~df["is_income"]) & (df["amount"] > 0)]
+
+    # normalized spend column
+    df["spend"] = df["amount"].astype(float)
+    return df
+
+
+@reports_bp.route("/api/calendar_2week")
+@login_required
+def api_calendar_2week():
+    """
+    Query:
+      ?anchor=YYYY-MM-DD  (defaults today)
+      ?days=14            (defaults 14)
+      ?range=30d|ytd|12m  (optional; if provided, still hard-filters to window)
+    Returns:
+      [{date, dow, spend_total, txn_count}, ...] for the window ending at anchor (inclusive)
+    """
+    anchor_s = (request.args.get("anchor") or "").strip()
+    days = int(request.args.get("days", "14"))
+    days = max(7, min(60, days))
+
+    anchor = date.today()
+    if anchor_s:
+        try:
+            anchor = datetime.strptime(anchor_s, "%Y-%m-%d").date()
+        except Exception:
+            pass
+
+    start = anchor - timedelta(days=days - 1)
+
+    df = _load_tx_detail()
+    df = _spend_rows(df)
+    if df.empty:
+        # still return the dates with zeros so the UI can render
+        out = []
+        for i in range(days):
+            d = start + timedelta(days=i)
+            out.append({"date": d.isoformat(), "dow": d.strftime("%a"), "spend_total": 0.0, "txn_count": 0})
+        return jsonify(out)
+
+    df = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= anchor)]
+
+    g = (
+        df.groupby(df["date"].dt.date)
+          .agg(spend_total=("spend", "sum"), txn_count=("spend", "count"))
+    )
+
+    out = []
+    for i in range(days):
+        d = start + timedelta(days=i)
+        row = g.loc[d] if d in g.index else None
+        out.append({
+            "date": d.isoformat(),
+            "dow": d.strftime("%a"),
+            "spend_total": round(float(row["spend_total"]), 2) if row is not None else 0.0,
+            "txn_count": int(row["txn_count"]) if row is not None else 0,
+        })
+    return jsonify(out)
+
+
+@reports_bp.route("/api/calendar_month")
+@login_required
+def api_calendar_month():
+    """
+    Query:
+      ?month=YYYY-MM (defaults current month)
+    Returns:
+      { month, weeks: [[day|null,...7], ...] }
+    Each day: {date, day, spend_total, txn_count}
+    """
+    month_s = (request.args.get("month") or "").strip()
+    today = date.today()
+
+    if month_s:
+        try:
+            y, m = map(int, month_s.split("-"))
+            month_first = date(y, m, 1)
+        except Exception:
+            month_first = date(today.year, today.month, 1)
+    else:
+        month_first = date(today.year, today.month, 1)
+
+    # compute last day of month
+    next_month = date(month_first.year + (month_first.month == 12), 1 if month_first.month == 12 else month_first.month + 1, 1)
+    month_last = next_month - timedelta(days=1)
+
+    df = _load_tx_detail()
+    df = _spend_rows(df)
+    if not df.empty:
+        df = df[(df["date"].dt.date >= month_first) & (df["date"].dt.date <= month_last)]
+        g = (
+            df.groupby(df["date"].dt.date)
+              .agg(spend_total=("spend", "sum"), txn_count=("spend", "count"))
+        )
+    else:
+        g = None
+
+    # calendar starts on Sunday (0) for UI table
+    # Python weekday: Mon=0..Sun=6, so Sunday index is 6
+    start_pad = (month_first.weekday() + 1) % 7  # Sun=0..Sat=6
+    days_in_month = month_last.day
+
+    cells = []
+    for _ in range(start_pad):
+        cells.append(None)
+
+    for day in range(1, days_in_month + 1):
+        d = date(month_first.year, month_first.month, day)
+        row = (g.loc[d] if (g is not None and d in g.index) else None)
+        cells.append({
+            "date": d.isoformat(),
+            "day": day,
+            "spend_total": round(float(row["spend_total"]), 2) if row is not None else 0.0,
+            "txn_count": int(row["txn_count"]) if row is not None else 0,
+        })
+
+    # pad to full weeks
+    while len(cells) % 7 != 0:
+        cells.append(None)
+
+    weeks = [cells[i:i+7] for i in range(0, len(cells), 7)]
+    return jsonify({"month": f"{month_first.year:04d}-{month_first.month:02d}", "weeks": weeks})
+
+
+@reports_bp.route("/api/day_spend_detail")
+@login_required
+def api_day_spend_detail():
+    """
+    Query:
+      ?date=YYYY-MM-DD
+    Returns: list of spend txns for that day (top 200 by amount desc)
+    """
+    d_s = (request.args.get("date") or "").strip()
+    try:
+        d = datetime.strptime(d_s, "%Y-%m-%d").date()
+    except Exception:
+        return jsonify({"error": "invalid date; expected YYYY-MM-DD"}), 400
+
+    df = _load_tx_detail()
+    df = _spend_rows(df)
+    if df.empty:
+        return jsonify([])
+
+    df = df[df["date"].dt.date == d].copy()
+    if df.empty:
+        return jsonify([])
+
+    # pick safe columns
+    cols = []
+    for c in ["date", "merchant_name", "name", "amount", "category", "transaction_id", "account_id"]:
+        if c in df.columns:
+            cols.append(c)
+
+    df = df.sort_values("amount", ascending=False).head(200)[cols]
+    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    return jsonify(df.to_dict(orient="records"))
+
 
 # -------------------------------------------------------------------
 # M4: Budget engine

@@ -1,0 +1,75 @@
+{
+  "inflow_streams": [
+    {
+      "account_id": "4d83D6L1AXH8eOrgrrV0hAgnPaVn8DHDNvP5Y",
+      "stream_id": "Vwano8NYBpCJxMk0kkK4cRRj619PjvCn17Lv0",
+      "category": null,
+      "category_id": null,
+      "description": "FIFTH THIRD BANK",
+      "merchant_name": "",
+      "first_date": "2025-10-06",
+      "last_date": "2025-12-15",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "BvnP4jragXCwzpyxyye9tjRknKK6v9t8EgmNe",
+        "q738Bpz6Qbh1EgpeppkYUaBxk00owECxpqRn3",
+        "1VaPwJd6yXCaEoP3PPkMUbjyY55w0KtoN05A9",
+        "DjwB8RaJ9pFLgZY6YYRqUYLXoQQnZNUzbMegK",
+        "BvnP4jragXCwzpyxyye9tjRv1enYVVtdQ7KJ7",
+        "q738Bpz6Qbh1EgpeppkYUaBwZnkjeesBPEK31"
+      ],
+      "average_amount": {
+        "amount": -30.0
+      },
+      "last_amount": {
+        "amount": -30.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_IN",
+        "detailed": "TRANSFER_IN_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-29"
+    },
+    {
+      "account_id": "4d83D6L1AXH8eOrgrrV0hAgnPaVn8DHDNvP5Y",
+      "stream_id": "91gv3qBy4XTgmKPJPPXpHppqn6kaqXt6epKnn",
+      "category": null,
+      "category_id": null,
+      "description": "Monthly Interest Paid",
+      "merchant_name": "",
+      "first_date": "2025-09-30",
+      "last_date": "2025-11-30",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "3MJBLw6DkXTJmVLDLLkzuzoVKddagAUzyVXL6",
+        "P7AnmRNY6ph0q4PVPPmQcxraRyybPkIaPgLJ8",
+        "3MJBLw6DkXTJmVLDLLkzuzog5BKYwwC7QAN47"
+      ],
+      "average_amount": {
+        "amount": -2.9499999999999997
+      },
+      "last_amount": {
+        "amount": -3.08
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_INTEREST_EARNED",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-30"
+    }
+  ],
+  "outflow_streams": [],
+  "updated_datetime": "2025-12-28 00:35:03+00:00",
+  "request_id": "inO0aIKJNHagEu4",
+  "personal_finance_category_version": "v1"
+}
