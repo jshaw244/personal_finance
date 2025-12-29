@@ -192,16 +192,16 @@ def save_accounts(item_id: str, accounts: list[dict]) -> None:
             )
 
         # Prune accounts for this item not in latest response
-        if seen_ids:
-            placeholders = ",".join(["?"] * len(seen_ids))
-            cur.execute(
-                f"""
-                DELETE FROM accounts
-                WHERE item_id = ?
-                  AND account_id NOT IN ({placeholders})
-                """,
-                (item_id, *seen_ids),
-            )
+        #if seen_ids:
+        #   placeholders = ",".join(["?"] * len(seen_ids))
+        #   cur.execute(
+        #       f"""
+        #       DELETE FROM accounts
+        #       WHERE item_id = ?
+        #         AND account_id NOT IN ({placeholders})
+        #       """,
+        #       (item_id, *seen_ids),
+        #   )
 
         conn.commit()
 
@@ -277,6 +277,17 @@ def save_transactions(item_id: str, transactions: list[dict]) -> None:
                     now,
                 ),
             )
+            cur.execute(
+                    """
+                    INSERT INTO transaction_meta (transaction_id, item_id, payload_json, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(transaction_id) DO UPDATE SET
+                    item_id=excluded.item_id,
+                    payload_json=excluded.payload_json,
+                    updated_at=excluded.updated_at
+                    """,
+                    (tid, item_id, json.dumps(t, default=str), now),
+            )
 
         conn.commit()
 
@@ -327,6 +338,9 @@ def apply_removed_transactions(item_id: str, removed: list[dict]) -> None:
             # delete from transactions
             cur.execute("DELETE FROM transactions WHERE transaction_id = ?", (tid,))
 
+            # classifications will cascade because it FK's to transactions, but explicit is fine too:
+            cur.execute("DELETE FROM transaction_classifications WHERE transaction_id = ?", (tid,))
+
             # OPTIONAL: if you have transactions_removed table
             cur.execute(
                  """
@@ -367,6 +381,439 @@ def count_transactions_canonical(
             WHERE {" AND ".join(where)}
         """
         return int(conn.execute(sql, params).fetchone()[0])
+
+# -----------------------------
+# Liabilities helper
+# -----------------------------
+
+def upsert_liabilities_raw(item_id: str, payload: dict) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            """
+            INSERT INTO liabilities_raw (item_id, payload_json, captured_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(item_id) DO UPDATE SET
+              payload_json=excluded.payload_json,
+              captured_at=CURRENT_TIMESTAMP
+            """,
+            (item_id, json.dumps(payload, default=str)),
+        )
+        conn.commit()
+
+def upsert_recurring_raw(item_id: str, payload: dict) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            """
+            INSERT INTO recurring_raw (item_id, payload_json, captured_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(item_id) DO UPDATE SET
+              payload_json=excluded.payload_json,
+              captured_at=CURRENT_TIMESTAMP
+            """,
+            (item_id, json.dumps(payload, default=str)),
+        )
+        conn.commit()
+
+# -----------------------------
+# Transaction classification rules
+# -----------------------------
+import re
+
+_EXCLUDE_PATTERNS = [
+    r"\bpayment\b", r"\bpymt\b", r"\bautopay\b",
+    r"\btransfer\b", r"\bach\b",
+    r"\bcard\s*payment\b", r"\bcredit\s*card\s*payment\b",
+]
+
+def normalize_merchant(s: str | None) -> str:
+    if not s:
+        return ""
+    s = s.lower().strip()
+
+    # common cleanup
+    s = s.replace("*", " ")
+    s = re.sub(r"[^a-z0-9\s]", " ", s)     # punctuation -> space
+    s = re.sub(r"\s+", " ", s).strip()    # collapse spaces
+    return s
+
+def get_transaction_basic(transaction_id: str) -> dict | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT
+              transaction_id,
+              item_id,
+              account_id,
+              name,
+              merchant_name
+            FROM transactions
+            WHERE transaction_id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_top_merchants(days: int = 30, limit: int = 50) -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+              COALESCE(c.merchant_normalized, LOWER(TRIM(COALESCE(t.merchant_name, t.name)))) AS merchant,
+              SUM(t.amount) AS total_spend,
+              COUNT(*) AS txn_count
+            FROM transactions t
+            LEFT JOIN transaction_classifications c
+              ON c.transaction_id = t.transaction_id
+            WHERE t.date >= date('now', ?)
+              AND t.amount > 0
+              AND COALESCE(c.exclude_from_spend, 0) = 0
+            GROUP BY merchant
+            ORDER BY total_spend DESC
+            LIMIT ?
+            """,
+            (f"-{int(days)} day", int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def get_credit_card_statement_summary(item_id: str | None = None) -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+
+        # account_id -> account name + institution
+        acct_rows = conn.execute(
+            """
+            SELECT a.account_id, a.name AS account_name, i.institution_name, a.mask
+            FROM accounts a
+            JOIN items i ON i.item_id = a.item_id
+            """
+        ).fetchall()
+        acct_map = {r["account_id"]: dict(r) for r in acct_rows}
+
+        if item_id:
+            lr = conn.execute("SELECT item_id, payload_json, captured_at FROM liabilities_raw WHERE item_id = ?", (item_id,)).fetchall()
+        else:
+            lr = conn.execute("SELECT item_id, payload_json, captured_at FROM liabilities_raw").fetchall()
+
+    out: list[dict[str, Any]] = []
+    for r in lr:
+        payload = json.loads(r["payload_json"])
+        liab = (payload.get("liabilities") or {})
+        credit_list = liab.get("credit") or []
+
+        for cc in credit_list:
+            aid = cc.get("account_id")
+            meta = acct_map.get(aid, {})
+            out.append({
+                "item_id": r["item_id"],
+                "captured_at": r["captured_at"],
+                "institution_name": meta.get("institution_name"),
+                "account_id": aid,
+                "account_name": meta.get("account_name"),
+                "mask": meta.get("mask"),
+                "is_overdue": cc.get("is_overdue"),
+                "last_statement_issue_date": cc.get("last_statement_issue_date"),
+                "last_statement_balance": cc.get("last_statement_balance"),
+                "minimum_payment_amount": cc.get("minimum_payment_amount"),
+                "next_payment_due_date": cc.get("next_payment_due_date"),
+                "last_payment_amount": cc.get("last_payment_amount"),
+                "last_payment_date": cc.get("last_payment_date"),
+            })
+    return out
+
+
+def get_recurring_raw(item_id: str | None = None) -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+
+        if item_id:
+            rows = conn.execute(
+                "SELECT item_id, captured_at, payload_json FROM recurring_raw WHERE item_id = ?",
+                (item_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT item_id, captured_at, payload_json FROM recurring_raw ORDER BY captured_at DESC",
+            ).fetchall()
+
+        out = []
+        for r in rows:
+            d = dict(r)
+            # keep payload as JSON object (nicer to inspect)
+            try:
+                d["payload"] = json.loads(d.pop("payload_json"))
+            except Exception:
+                d["payload"] = d.pop("payload_json")
+            out.append(d)
+        return out
+
+def upsert_transaction_classification(
+    transaction_id: str,
+    exclude_from_spend: int = 0,
+    exclude_reason: str | None = None,
+    user_category: str | None = None,
+    user_subcategory: str | None = None,
+    merchant_normalized: str | None = None,
+) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            """
+            INSERT INTO transaction_classifications (
+              transaction_id,
+              exclude_from_spend,
+              exclude_reason,
+              user_category,
+              user_subcategory,
+              merchant_normalized,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(transaction_id) DO UPDATE SET
+              exclude_from_spend=excluded.exclude_from_spend,
+              exclude_reason=excluded.exclude_reason,
+              user_category=COALESCE(excluded.user_category, transaction_classifications.user_category),
+              user_subcategory=COALESCE(excluded.user_subcategory, transaction_classifications.user_subcategory),
+              merchant_normalized=COALESCE(excluded.merchant_normalized, transaction_classifications.merchant_normalized),
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                transaction_id,
+                int(bool(exclude_from_spend)),
+                exclude_reason,
+                user_category,
+                user_subcategory,
+                merchant_normalized,
+            ),
+        )
+        conn.commit()
+
+
+def get_transactions_for_classification(days: int = 365, item_id: str | None = None) -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+
+        where = ["t.date >= date('now', ?)"]
+        params: list[Any] = [f"-{int(days)} day"]
+
+        if item_id:
+            where.append("t.item_id = ?")
+            params.append(item_id)
+
+        sql = f"""
+            SELECT
+              t.transaction_id,
+              t.item_id,
+              t.account_id,
+              t.date,
+              t.name,
+              t.merchant_name,
+              t.amount,
+              tm.payload_json AS meta_json
+            FROM transactions t
+            LEFT JOIN transaction_meta tm
+              ON tm.transaction_id = t.transaction_id
+            WHERE {" AND ".join(where)}
+        """
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+def insert_classification_rule(
+    match_field: str,
+    match_op: str,
+    match_value: str,
+    account_id: str | None,
+    exclude_from_spend: int = 0,
+    exclude_reason: str | None = None,
+    user_category: str | None = None,
+    user_subcategory: str | None = None,
+    merchant_normalized: str | None = None,
+    priority: int = 100,
+) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        cur = conn.execute(
+            """
+            INSERT INTO classification_rules (
+              enabled, priority,
+              match_field, match_op, match_value,
+              account_id,
+              exclude_from_spend, exclude_reason,
+              user_category, user_subcategory, merchant_normalized,
+              created_at, updated_at
+            )
+            VALUES (
+              1, ?,
+              ?, ?, ?,
+              ?,
+              ?, ?,
+              ?, ?, ?,
+              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+            """,
+            (
+                int(priority),
+                match_field, match_op, match_value,
+                account_id,
+                int(bool(exclude_from_spend)), exclude_reason,
+                user_category, user_subcategory, merchant_normalized,
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def classification_exists(transaction_id: str) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        row = conn.execute(
+            "SELECT 1 FROM transaction_classifications WHERE transaction_id = ? LIMIT 1",
+            (transaction_id,),
+        ).fetchone()
+        return row is not None
+
+
+def _rule_matches(rule: dict, name_norm: str, merchant_norm: str) -> bool:
+    field = rule["match_field"]
+    op = rule["match_op"]
+    val = rule["match_value"] or ""
+
+    candidates = []
+    if field == "name":
+        candidates = [name_norm]
+    elif field == "merchant_name":
+        candidates = [merchant_norm]
+    else:  # 'either'
+        candidates = [merchant_norm, name_norm]
+
+    for c in candidates:
+        if not c:
+            continue
+        if op == "equals" and c == val:
+            return True
+        if op == "contains" and val and val in c:
+            return True
+    return False
+
+
+def apply_best_rule_to_transaction(transaction_id: str) -> dict | None:
+    """
+    Apply the best matching enabled rule to a transaction,
+    but DO NOT override if the user has already classified it.
+    Returns the rule applied (dict) or None.
+    """
+    if classification_exists(transaction_id):
+        return None
+
+    tx = get_transaction_basic(transaction_id)
+    if not tx:
+        return None
+
+    name_norm = normalize_merchant(tx.get("name"))
+    merchant_norm = normalize_merchant(tx.get("merchant_name"))
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+        rules = conn.execute(
+            """
+            SELECT *
+            FROM classification_rules
+            WHERE enabled = 1
+              AND (account_id IS NULL OR account_id = ?)
+            ORDER BY priority ASC, rule_id ASC
+            """,
+            (tx["account_id"],),
+        ).fetchall()
+
+    for r in rules:
+        rule = dict(r)
+        if _rule_matches(rule, name_norm, merchant_norm):
+            upsert_transaction_classification(
+                transaction_id=transaction_id,
+                exclude_from_spend=rule.get("exclude_from_spend", 0),
+                exclude_reason=rule.get("exclude_reason"),
+                user_category=rule.get("user_category"),
+                user_subcategory=rule.get("user_subcategory"),
+                merchant_normalized=rule.get("merchant_normalized") or rule.get("match_value"),
+            )
+            return rule
+
+    return None
+
+def apply_classification_rules(*args, **kwargs):
+    """
+    Placeholder: classification is optional.
+    Keep this function to satisfy imports even if rules are not implemented yet.
+    """
+    return 0
+
+def apply_rules_bulk(days: int = 365, item_id: str | None = None) -> dict:
+    """
+    Apply rules to recent transactions; does not override existing classifications.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+
+        where = ["date >= date('now', ?)"]
+        params: list[Any] = [f"-{int(days)} day"]
+        if item_id:
+            where.append("item_id = ?")
+            params.append(item_id)
+
+        rows = conn.execute(
+            f"""
+            SELECT transaction_id
+            FROM transactions
+            WHERE {" AND ".join(where)}
+            ORDER BY date DESC
+            """,
+            params,
+        ).fetchall()
+
+    applied = 0
+    for r in rows:
+        rule = apply_best_rule_to_transaction(r["transaction_id"])
+        if rule:
+            applied += 1
+
+    return {"scanned": len(rows), "applied": applied}
+
+def _resolve_53_checking_account_id() -> str | None:
+    aid = (os.getenv("FIFTH_THIRD_CHECKING_ACCOUNT_ID") or "").strip()
+    if aid:
+        return aid
+
+    # best-effort fallback (works if you have accounts/items populated)
+    if not DB_PATH.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("""
+            SELECT a.account_id
+            FROM accounts a
+            JOIN items i ON i.item_id = a.item_id
+            WHERE LOWER(i.institution_name) LIKE '%fifth%'
+              AND LOWER(a.subtype) = 'checking'
+            ORDER BY a.updated_at DESC
+            LIMIT 1
+        """).fetchone()
+        conn.close()
+        return row["account_id"] if row else None
+    except Exception:
+        return None
+
 
 
 # -----------------------------
@@ -464,6 +911,59 @@ def get_transactions_canonical(
 
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+def get_spend_canonical(
+    days: int = 30,
+    item_id: str | None = None,
+    account_id: str | None = None,
+    include_excluded: bool = False,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+
+        where = ["t.date >= date('now', ?)", "t.amount > 0"]
+        params: list[Any] = [f"-{int(days)} day"]
+
+        if item_id:
+            where.append("t.item_id = ?")
+            params.append(item_id)
+
+        if account_id:
+            where.append("t.account_id = ?")
+            params.append(account_id)
+
+        if not include_excluded:
+            where.append("COALESCE(c.exclude_from_spend, 0) = 0")
+
+        params.extend([int(limit), int(offset)])
+
+        sql = f"""
+            SELECT
+              t.*,
+              i.institution_id,
+              i.institution_name,
+              a.name AS account_name,
+              a.type AS account_type,
+              a.subtype AS account_subtype,
+              COALESCE(c.exclude_from_spend, 0) AS exclude_from_spend,
+              c.exclude_reason,
+              c.merchant_normalized,
+              c.user_category,
+              c.user_subcategory
+            FROM transactions t
+            JOIN items i ON i.item_id = t.item_id
+            JOIN accounts a ON a.account_id = t.account_id
+            LEFT JOIN transaction_classifications c ON c.transaction_id = t.transaction_id
+            WHERE {" AND ".join(where)}
+            ORDER BY t.date DESC
+            LIMIT ? OFFSET ?
+        """
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
 
 # -----------------------------
 # Cascade delete local data for item

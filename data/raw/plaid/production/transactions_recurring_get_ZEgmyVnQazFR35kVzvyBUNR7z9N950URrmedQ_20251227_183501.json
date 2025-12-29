@@ -1,0 +1,831 @@
+{
+  "inflow_streams": [
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "jEKnAmkjpPFE5d7QnpKEHmme5O9R1EHvqMXgd",
+      "category": null,
+      "category_id": null,
+      "description": "Employer Payroll",
+      "merchant_name": "Employer",
+      "first_date": "2025-10-02",
+      "last_date": "2025-12-24",
+      "frequency": "UNKNOWN",
+      "transaction_ids": [
+        "bQLRoeDjMzSJ83x0Rj9VurrbVpKzkPUPqDRo1",
+        "vM6DOe8Ep4Hm4gKVd1ZPIKKAZpaebLhpm0Kzy",
+        "epP7yeqbawiPaEZVpx7esyyvR9YKAgT4dbRae",
+        "95DeJ0v8qpH9bMQ7XaJNUvvgk5aj8wC6dxnyv",
+        "95DeJ0v8qpH9bMQ7XaJNUvv7585RyjI6mjnrn",
+        "4axeNy3Z6ps37XjpVvgRHvvRyNydqBIDB5x1Z",
+        "D306ObB4RzhkoE89RO6QH1NmMQK0vYhzvYjBr"
+      ],
+      "average_amount": {
+        "amount": -3382.8642857142854
+      },
+      "last_amount": {
+        "amount": -5338.57
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "INCOME",
+        "detailed": "INCOME_WAGES",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": null
+    },
+    {
+      "account_id": "PJgv3VnaRzs3zj6NmnVKHpp341P959F113kzv",
+      "stream_id": "8ZL5JvAnPpiyNb7r04QyHvvdEMkVQ4UY7r9bv",
+      "category": null,
+      "category_id": null,
+      "description": "5/3 ONLINE TRANSFER FROM CK: XXXXXX5175 REF # 01192149669",
+      "merchant_name": "",
+      "first_date": "2025-10-06",
+      "last_date": "2025-12-15",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "8ZL5JvAnPpiyNb7r04QoF773kr4m6whYyv8Bv",
+        "J0MByVv4RzSaoAKmRxp7FBBDPKO0XLI0b7Pq0",
+        "xMDPme7EXxHmjPAr6q9VIZZE9P60wbFmMKqyO",
+        "aE60DpLoRzF6dgN03qwmcLL1qQ0xKgtKZ1xbZ",
+        "M4gKPYnbRzSAVbYe4BoOf88dqnqQ4Af0bn6kN",
+        "OxEABVn4XzsPKqw9XA1QsEEnmZmKLYupqBjNn"
+      ],
+      "average_amount": {
+        "amount": -60.0
+      },
+      "last_amount": {
+        "amount": -60.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_IN",
+        "detailed": "TRANSFER_IN_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-29"
+    }
+  ],
+  "outflow_streams": [
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "mEv7je08p3FJEj6MNvZJcggoXzODBmh85YyK0",
+      "category": null,
+      "category_id": null,
+      "description": "WEB INITIATED PAYMENT AT AMEX EPAYMENT ACH PMT A3714 121525",
+      "merchant_name": "",
+      "first_date": "2025-10-14",
+      "last_date": "2025-12-15",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "jEKnAmkjpPFE5d7QnpK9FyyM9xEYXBTvRj5mN",
+        "gEB7ke3jaLFBJboQ78aesddweBD7zkU6qKNAw",
+        "vM6DOe8Ep4Hm4gKVd1ZPIKK6pbpgreipd1KY7"
+      ],
+      "average_amount": {
+        "amount": 3377.2533333333336
+      },
+      "last_amount": {
+        "amount": 3478.26
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "LOAN_PAYMENTS",
+        "detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-15"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "Q8g0BVX7RziMDkLEVRNMHwwObpKNJ8s9QRjVD",
+      "category": null,
+      "category_id": null,
+      "description": "WEB INITIATED PAYMENT AT SYNCHRONY BANK TRANSFER 16009838619 122625",
+      "merchant_name": "Synchrony",
+      "first_date": "2025-10-07",
+      "last_date": "2025-12-26",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "4axeNy3Z6ps37XjpVvgRHvv9kyYBNVCDknx8w",
+        "wML1qY8EpaHgPdkVwn7qFaay7x6p0JuRLvkrq",
+        "M4gKPYnbRzSAVbYe4BoOf88YRqgAnXF0Mp6PQ",
+        "4axeNy3Z6ps37XjpVvgRHvv9kyYBNVCDknxqw",
+        "J0MByVv4RzSaoAKmRxp7FBBJKXKwr0I08ZPAp",
+        "ZEgmyVnQazFR35kVzvyBUNNYdBdZDMt8DBozR",
+        "EyjL0gm4RzudqJvnRYm7f6odMggj86t5EaKyN"
+      ],
+      "average_amount": {
+        "amount": 778.5714285714286
+      },
+      "last_amount": {
+        "amount": 650.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_OUT",
+        "detailed": "TRANSFER_OUT_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-09"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "LrMybVjYRzT1ek68XEv1fmmkvpOA8dHJM74y1",
+      "category": null,
+      "category_id": null,
+      "description": "CHASE CREDIT CRD AUTOPAY XXXXXXXXXXX4647 122225",
+      "merchant_name": "",
+      "first_date": "2025-10-21",
+      "last_date": "2025-12-22",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "6Jw4bkK7DpsPdob8kjBDsqqvRQjONxFAaNEYK",
+        "APkYKZ1R0zuRyzYAOm3gUBBLeRQa0oIw6n3jL",
+        "APkYKZ1R0zuRyzYAOm3gUBBzR0RbdaIwE13ZP"
+      ],
+      "average_amount": {
+        "amount": 504.8233333333333
+      },
+      "last_amount": {
+        "amount": 615.87
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "LOAN_PAYMENTS",
+        "detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-22"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "RZgdbEnKRziP0JDN98kPhOOe3pNr1PC96PRxn",
+      "category": null,
+      "category_id": null,
+      "description": "WEB INITIATED PAYMENT AT SYNCHRONY BANK TRANSFER 15899326509 121625",
+      "merchant_name": "Synchrony",
+      "first_date": "2025-10-07",
+      "last_date": "2025-12-16",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "aE60DpLoRzF6dgN03qwmcLL1qQ0xKgtKZ1xb6",
+        "LrMybVjYRzT1ek68XEvYIRRPO4d1ZLFJ0By84",
+        "EyjL0gm4RzudqJvnRYm1caaqwANrp8udpn4E6",
+        "aE60DpLoRzF6dgN03qwmcLL1qQ0xKgtKZ1x46",
+        "8ZL5JvAnPpiyNb7r04QoF77er6r9ZmiY3e8mp",
+        "5mdOJKyNLpILqz6Xv0jbhxxYe9eoVwFNgPMbw"
+      ],
+      "average_amount": {
+        "amount": 201.0
+      },
+      "last_amount": {
+        "amount": 201.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_OUT",
+        "detailed": "TRANSFER_OUT_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-30"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "PJgv3VnaRzs3zj6NmnV3IZZoKeO8JkUOxj3RP",
+      "category": null,
+      "category_id": null,
+      "description": "WEB INITIATED PAYMENT AT LIBEBK CK WEBXFR ETRANSFER 15984135299 122325",
+      "merchant_name": "",
+      "first_date": "2025-10-23",
+      "last_date": "2025-12-23",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "mEv7je08p3FJEj6MNvZeuJJrO5m6qnU8MvKNe",
+        "kEkMgeAjpqFXJvzVM6OYULLgYkKmNBtbRvNEm",
+        "kEkMgeAjpqFXJvzVM6OYULLjkNkvymCbAVNpX"
+      ],
+      "average_amount": {
+        "amount": 381.0
+      },
+      "last_amount": {
+        "amount": 381.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_OUT",
+        "detailed": "TRANSFER_OUT_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-23"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "7864RAkO1eiEOYZ87rNEHVV1QvAe3pf8KrqVk",
+      "category": null,
+      "category_id": null,
+      "description": "ATT PAYMENT 823935002EPAYG 120325",
+      "merchant_name": "AT&T",
+      "first_date": "2025-10-01",
+      "last_date": "2025-12-03",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "kEkMgeAjpqFXJvzVM6OYULLgYkKmNBtbRvN0V",
+        "XEgPrOnoazFjrgyNdkBbT44eknYx1VHz4a960",
+        "xMDPme7EXxHmjPAr6q9VIZZgPwPjV0Um40qA3"
+      ],
+      "average_amount": {
+        "amount": 182.48000000000002
+      },
+      "last_amount": {
+        "amount": 182.5
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_TELEPHONE",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-03"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "dp1myePjadiMP08zmD9MHOOKM576oAConpj7r",
+      "category": null,
+      "category_id": null,
+      "description": "Best Buy",
+      "merchant_name": "Best Buy",
+      "first_date": "2025-10-17",
+      "last_date": "2025-12-19",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "APkYKZ1R0zuRyzYAOm3gUBBLeRQa0oIw6n3QL",
+        "rMadXe8RpvHaoRqYknzBFnnEgN9zPdFrBwNbv",
+        "aE60DpLoRzF6dgN03qwmcLLAQKQeZxCKgkxym"
+      ],
+      "average_amount": {
+        "amount": 140.0
+      },
+      "last_amount": {
+        "amount": 140.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "GENERAL_MERCHANDISE",
+        "detailed": "GENERAL_MERCHANDISE_ELECTRONICS",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-19"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "1jrR7qPmJpSngwxOkK3nhvvkr4QpRKUYvD8yZ",
+      "category": null,
+      "category_id": null,
+      "description": "COMED PAYMENTS 4257536000 121825",
+      "merchant_name": "ComEd",
+      "first_date": "2025-10-21",
+      "last_date": "2025-12-18",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "D306ObB4RzhkoE89RO6QH44Kd1Nv0XHXZR4gM",
+        "jEKnAmkjpPFE5d7QnpK9FyyM9xEYXBTvRj53N",
+        "J0MByVv4RzSaoAKmRxp7FBBJKXKwr0I08ZPAg"
+      ],
+      "average_amount": {
+        "amount": 138.10333333333335
+      },
+      "last_amount": {
+        "amount": 90.24
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "RENT_AND_UTILITIES",
+        "detailed": "RENT_AND_UTILITIES_OTHER_UTILITIES",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-18"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "OxEABVn4XzsPKqw9XA1PhbbxvkRw46Up713d1",
+      "category": null,
+      "category_id": null,
+      "description": "5/3 ONLINE TRANSFER TO SV: XXXXXX4999 REF # 01192149669",
+      "merchant_name": "",
+      "first_date": "2025-10-06",
+      "last_date": "2025-12-15",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "ZEgmyVnQazFR35kVzvyBUNNpodeMB0C8Rkojg",
+        "yM1qRe8EpJHAV8vzLB3ofmm93Qz7AktROgq9e",
+        "pMr7me8VpkHrzo17n6Kef006Q1XY7xUAJ4Ra4",
+        "oYjXneOkpKTjeqDrx6Y7TEE9JAzpxLurBbgO6",
+        "bQLRoeDjMzSJ83x0Rj9VurrypkpaBzFP5yRd8",
+        "00jRQP1kOpSrbOPXam7vfRRD0Z0jJwH9KnOxJ"
+      ],
+      "average_amount": {
+        "amount": 60.0
+      },
+      "last_amount": {
+        "amount": 60.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_OUT",
+        "detailed": "TRANSFER_OUT_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-29"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "YEgqMVno7zFXPeKJw36XCRRJxz3E9NFz6j3o6",
+      "category": null,
+      "category_id": null,
+      "description": "WEB INITIATED PAYMENT AT CAPITAL ONE CRCARDPMT CA0A60D04379FDA 122225",
+      "merchant_name": "",
+      "first_date": "2025-10-22",
+      "last_date": "2025-12-22",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "dp1myePjadiMP08zmD97FzzP7qABEgtobQ7D4",
+        "vM6DOe8Ep4Hm4gKVd1ZPIKKAZpaebLhpm0Kgy",
+        "jEKnAmkjpPFE5d7QnpK9FyyqxXxdaYSvrP5QP"
+      ],
+      "average_amount": {
+        "amount": 119.63333333333333
+      },
+      "last_amount": {
+        "amount": 104.13
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "LOAN_PAYMENTS",
+        "detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-22"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "4axeNy3Z6ps37XjpVvg3Ieexr0kEjYTDj6QxA",
+      "category": null,
+      "category_id": null,
+      "description": "AKC PET INSURANCE",
+      "merchant_name": "Akc Pet Insurance",
+      "first_date": "2025-10-07",
+      "last_date": "2025-12-08",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "D306ObB4RzhkoE89RO6QH44Kd1Nv0XHXZR465",
+        "XEgPrOnoazFjrgyNdkBbT44eknYx1VHz4a9Xe",
+        "XEgPrOnoazFjrgyNdkBbT44On1nzvxfz519Pn"
+      ],
+      "average_amount": {
+        "amount": 77.64
+      },
+      "last_amount": {
+        "amount": 77.64
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "GENERAL_SERVICES",
+        "detailed": "GENERAL_SERVICES_INSURANCE",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-08"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "aE60DpLoRzF6dgN03qw6TaapJVqB40fKqpexZ",
+      "category": null,
+      "category_id": null,
+      "description": "VCA CARE CLUB AUTHORIZ",
+      "merchant_name": "Vca Care Club Authoriz",
+      "first_date": "2025-10-10",
+      "last_date": "2025-12-10",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "LrMybVjYRzT1ek68XEvYIRRPO4d1ZLFJ0Byx1",
+        "pMr7me8VpkHrzo17n6Kef006Q1XY7xUAJ4R6z",
+        "pMr7me8VpkHrzo17n6Kef00p171o5YfAgMRQY"
+      ],
+      "average_amount": {
+        "amount": 64.99
+      },
+      "last_amount": {
+        "amount": 64.99
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "MEDICAL",
+        "detailed": "MEDICAL_VETERINARY_SERVICES",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-10"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "nn07Xejrpyin3ZLQjN8nhRRO9X7gBxFjm64KX",
+      "category": null,
+      "category_id": null,
+      "description": "American Airlines",
+      "merchant_name": "American Airlines",
+      "first_date": "2025-10-07",
+      "last_date": "2025-12-16",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "xMDPme7EXxHmjPAr6q9VIZZE9P60wbFmMKqy8",
+        "qM4Eoe8gpAH4NyPrkde7hjjLXQERVxH1JE9P5",
+        "Q8g0BVX7RziMDkLEVRNJFooVKx8MBmH9E4VJO",
+        "xMDPme7EXxHmjPAr6q9VIZZE9P60wbFmMKqo8",
+        "5mdOJKyNLpILqz6Xv0jbhxxYe9eoVwFNgPMd9",
+        "oYjXneOkpKTjeqDrx6Y7TEEwAxAqVpur6egdr"
+      ],
+      "average_amount": {
+        "amount": 30.0
+      },
+      "last_amount": {
+        "amount": 30.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRAVEL",
+        "detailed": "TRAVEL_FLIGHTS",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-30"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "epP7yeqbawiPaEZVpx7PhzznPZRw0YH4vo1RR",
+      "category": null,
+      "category_id": null,
+      "description": "WEB INITIATED PAYMENT AT CAPITAL ONE TRANSFER RT06B06E535F0A6 121625",
+      "merchant_name": "",
+      "first_date": "2025-10-07",
+      "last_date": "2025-12-16",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "J0MByVv4RzSaoAKmRxp7FBBDPKO0XLI0b7Pqd",
+        "BqAd35POjzt8AoPXeLx0sYY5By9rakhv97nQM",
+        "RZgdbEnKRziP0JDN98k3sxxVNJP5EkU9yqa1y",
+        "J0MByVv4RzSaoAKmRxp7FBBDPKO0XLI0b7Pkd",
+        "ZEgmyVnQazFR35kVzvyBUNNYdBdZDMt8DBozp",
+        "bQLRoeDjMzSJ83x0Rj9VurrypkpaBzFP5yRxD"
+      ],
+      "average_amount": {
+        "amount": 30.0
+      },
+      "last_amount": {
+        "amount": 30.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_OUT",
+        "detailed": "TRANSFER_OUT_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-30"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "zMPBReVEd8Hj7d04D3mjsLLx7Qm0vYCMwY3jE",
+      "category": null,
+      "category_id": null,
+      "description": "EDWARD JONES INVESTMENT 96006A600831121 121625",
+      "merchant_name": "Edward Jones",
+      "first_date": "2025-10-07",
+      "last_date": "2025-12-16",
+      "frequency": "BIWEEKLY",
+      "transaction_ids": [
+        "8ZL5JvAnPpiyNb7r04QoF773kr4m6whYyv8B4",
+        "PJgv3VnaRzs3zj6NmnVKHppVO0kzYaIOmARDQ",
+        "nn07Xejrpyin3ZLQjN8es44q7KxLVvHjApK7j",
+        "8ZL5JvAnPpiyNb7r04QoF773kr4m6whYyv8Z4",
+        "oYjXneOkpKTjeqDrx6Y7TEEwAxAqVpur6egk0",
+        "kEkMgeAjpqFXJvzVM6OYULLjkNkvymCbAVNp3"
+      ],
+      "average_amount": {
+        "amount": 30.0
+      },
+      "last_amount": {
+        "amount": 30.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_OUT",
+        "detailed": "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2025-12-30"
+    },
+    {
+      "account_id": "bQLRoeDjMzSJ83x0Rj9Vurrv5JdokXtggmbMy",
+      "stream_id": "D306ObB4RzhkoE89RO6kIpp8BwdxgNFXad345",
+      "category": null,
+      "category_id": null,
+      "description": "WEB INITIATED PAYMENT AT AMZ_STORECRD_PMT PAYMENT XXXXXXXXXXX5285 122225",
+      "merchant_name": "Amazon Store Card",
+      "first_date": "2025-10-21",
+      "last_date": "2025-12-22",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "1jrR7qPmJpSngwxOkK30sDDEQMK6zyFYmgyAa",
+        "00jRQP1kOpSrbOPXam7vfRR9d0YwZAF9rvOJL",
+        "rMadXe8RpvHaoRqYknzBFnnaNPNRkzHrp4NKx"
+      ],
+      "average_amount": {
+        "amount": 49.323333333333345
+      },
+      "last_amount": {
+        "amount": 2.99
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "LOAN_PAYMENTS",
+        "detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-22"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "8ZL5JvAnPpiyNb7r04QyHvvdEMkVQ4UY7r98v",
+      "category": null,
+      "category_id": null,
+      "description": "Netflix",
+      "merchant_name": "Netflix",
+      "first_date": "2025-10-21",
+      "last_date": "2025-12-22",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "dp1myePjadiMP08zmD97FzzP7qABEgtobQ7Nr",
+        "M4gKPYnbRzSAVbYe4BoOf88YRqgAnXF0Mp6OV",
+        "RZgdbEnKRziP0JDN98k3sxxRJEJAg5F90EadD"
+      ],
+      "average_amount": {
+        "amount": 33.98
+      },
+      "last_amount": {
+        "amount": 33.98
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_TV_AND_MOVIES",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-22"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "ZEgmyVnQazFR35kVzvyRCPPbj5oaveF8y7xoV",
+      "category": null,
+      "category_id": null,
+      "description": "OPENAI *CHATGPT SUBSCR",
+      "merchant_name": "OpenAI",
+      "first_date": "2025-10-27",
+      "last_date": "2025-12-26",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "mEv7je08p3FJEj6MNvZeuJJrO5m6qnU8MvKe0",
+        "YEgqMVno7zFXPeKJw36xUjjKb8baOntz58opM",
+        "OxEABVn4XzsPKqw9XA1pCxqbQAAVpOfNJOEgv"
+      ],
+      "average_amount": {
+        "amount": 20.0
+      },
+      "last_amount": {
+        "amount": 20.0
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "TRANSFER_OUT",
+        "detailed": "TRANSFER_OUT_ACCOUNT_TRANSFER",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-26"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "J0MByVv4RzSaoAKmRxpaHxx31EPnkOI0zVpP0",
+      "category": null,
+      "category_id": null,
+      "description": "YOUTUBEPREMIUM",
+      "merchant_name": "YouTube Premium",
+      "first_date": "2025-10-20",
+      "last_date": "2025-12-18",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "6Jw4bkK7DpsPdob8kjBDsqqvRQjONxFAaNEj3",
+        "RZgdbEnKRziP0JDN98k3sxxVNJP5EkU9yqaon",
+        "nn07Xejrpyin3ZLQjN8es445KVKZwLfjgPKqD"
+      ],
+      "average_amount": {
+        "amount": 13.99
+      },
+      "last_amount": {
+        "amount": 13.99
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_TV_AND_MOVIES",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-18"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "00jRQP1kOpSrbOPXam7rUxx8Q3damYI91EaOm",
+      "category": null,
+      "category_id": null,
+      "description": "SOUNDCLOUD MONTHLY GO",
+      "merchant_name": "Soundcloud Monthly",
+      "first_date": "2025-10-01",
+      "last_date": "2025-12-01",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "qM4Eoe8gpAH4NyPrkde7hjjLXQERVxH1JE9k0",
+        "zMPBReVEd8Hj7d04D3myTooDmeYzZkHMOnjJE",
+        "epP7yeqbawiPaEZVpx7esyyo9A9NjKS4zqReg"
+      ],
+      "average_amount": {
+        "amount": 10.99
+      },
+      "last_amount": {
+        "amount": 10.99
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "ENTERTAINMENT",
+        "detailed": "ENTERTAINMENT_OTHER_ENTERTAINMENT",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-01"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "xMDPme7EXxHmjPAr6q9mfkkDYR9qO6um13vqO",
+      "category": null,
+      "category_id": null,
+      "description": "GOOGLE ONE",
+      "merchant_name": "Google One",
+      "first_date": "2025-10-20",
+      "last_date": "2025-12-22",
+      "frequency": "MONTHLY",
+      "transaction_ids": [
+        "wML1qY8EpaHgPdkVwn7qFaay7x6p0JuRLvk3Y",
+        "EyjL0gm4RzudqJvnRYm1caaqwANrp8udpn48r",
+        "Q8g0BVX7RziMDkLEVRNJFooexBx53Mc9vBVbN"
+      ],
+      "average_amount": {
+        "amount": 1.99
+      },
+      "last_amount": {
+        "amount": 1.99
+      },
+      "is_active": true,
+      "status": "MATURE",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "GENERAL_MERCHANDISE",
+        "detailed": "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": "2026-01-22"
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "Q8g0BVX7RziMDkLEVRNMHwwObpKNJ8s9QRjQD",
+      "category": null,
+      "category_id": null,
+      "description": "Best Buy",
+      "merchant_name": "Mybestbuy Total Yearly",
+      "first_date": "2025-11-11",
+      "last_date": "2025-11-11",
+      "frequency": "ANNUALLY",
+      "transaction_ids": [
+        "nn07Xejrpyin3ZLQjN8es44q7KxLVvHjApKaX"
+      ],
+      "average_amount": {
+        "amount": 179.99
+      },
+      "last_amount": {
+        "amount": 179.99
+      },
+      "is_active": false,
+      "status": "EARLY_DETECTION",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "GENERAL_MERCHANDISE",
+        "detailed": "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": null
+    },
+    {
+      "account_id": "qM4Eoe8gpAH4NyPrkde7hjjOdKwepeFBBvXKR",
+      "stream_id": "RZgdbEnKRziP0JDN98kPhOOe3pNr1PC96PRan",
+      "category": null,
+      "category_id": null,
+      "description": "MICROSOFT*MICROSOFT 36",
+      "merchant_name": "Microsoft",
+      "first_date": "2025-11-03",
+      "last_date": "2025-11-03",
+      "frequency": "ANNUALLY",
+      "transaction_ids": [
+        "YEgqMVno7zFXPeKJw36xUjjV3bNn8ZHzQqod6"
+      ],
+      "average_amount": {
+        "amount": 108.74
+      },
+      "last_amount": {
+        "amount": 108.74
+      },
+      "is_active": false,
+      "status": "EARLY_DETECTION",
+      "is_user_modified": false,
+      "last_user_modified_datetime": "0001-01-01 00:00:00+00:00",
+      "personal_finance_category": {
+        "primary": "GENERAL_MERCHANDISE",
+        "detailed": "GENERAL_MERCHANDISE_ELECTRONICS",
+        "confidence_level": "UNKNOWN"
+      },
+      "predicted_next_date": null
+    }
+  ],
+  "updated_datetime": "2025-12-28 00:35:01+00:00",
+  "request_id": "8U1ZnF6EJKv9c1I",
+  "personal_finance_category_version": "v1"
+}

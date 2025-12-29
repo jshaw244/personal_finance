@@ -13,6 +13,8 @@ import json
 import time
 import logging
 import plaid
+import re
+
 from datetime import timedelta
 
 from flask import Flask, jsonify, request, make_response
@@ -27,11 +29,15 @@ from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchan
 from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.item_remove_request import ItemRemoveRequest
+from plaid.model.liabilities_get_request import LiabilitiesGetRequest
+from plaid.model.transactions_recurring_get_request import TransactionsRecurringGetRequest
+
 
 # ------------------------------------------------------------
 #  Internal imports
 # ------------------------------------------------------------
 from src.common.config import load_env
+from src.classification.rules import apply_classification_rules
 from src.storage.db import (
     init_db,
     save_item,
@@ -49,6 +55,20 @@ from src.storage.db import (
     delete_item_local,
     get_item_by_id,
     count_items_by_institution,
+    upsert_liabilities_raw,
+    #apply_classification_rules,
+    get_top_merchants,
+    get_credit_card_statement_summary,
+    upsert_recurring_raw,
+    get_recurring_raw,
+    get_transactions_for_classification,
+    upsert_transaction_classification,
+    get_spend_canonical,
+    get_transaction_basic,
+    normalize_merchant,
+    insert_classification_rule,
+    apply_best_rule_to_transaction,
+    apply_rules_bulk,
 )
 from src.common.paths import LOG_DIR, DB_FILE, DATA_DIR
 
@@ -95,6 +115,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")
 
 # Reports blueprint
+init_db()
 from src.presentation.reports import reports_bp, login_manager, ensure_summary_views_and_tables  # noqa: E402
 
 if os.getenv("ENABLE_SUMMARY_OBJECTS", "0") == "1":
@@ -107,7 +128,7 @@ app.config["REPORTS_INIT_DONE"] = False
 # ------------------------------------------------------------
 #  Logging Setup
 # ------------------------------------------------------------
-init_db()
+
 LOG_DIR.mkdir(exist_ok=True)
 
 MAINTENANCE_LOG = LOG_DIR / "maintenance.log"
@@ -226,6 +247,61 @@ def capture_plaid_raw(endpoint: str, item_id: str | None, payload: dict):
 
     _trim_raw_files(endpoint)
 
+_TRANSFER_HINTS = (
+    "transfer", "xfer", "webxfr", "etransfer", "online transfer",
+    "ach", "payment", "pmt", "epayment", "autopay",
+    "initiate", "initiated payment",
+)
+
+def classify_one(txn_row: dict) -> tuple[int, str | None, str | None]:
+    """
+    Returns: (exclude_from_spend, exclude_reason, merchant_normalized)
+
+    Policy (loose v1):
+      - Exclude definite credit card payments
+      - Exclude transfers ONLY when text also looks like a transfer/payment
+      - Do NOT exclude just because Plaid labeled it TRANSFER_* if merchant looks real
+    """
+    name = (txn_row.get("name") or "").lower()
+    merchant = (txn_row.get("merchant_name") or "").lower()
+    merch_norm = normalize_merchant(txn_row.get("merchant_name") or txn_row.get("name"))
+
+    meta = {}
+    try:
+        if txn_row.get("meta_json"):
+            meta = json.loads(txn_row["meta_json"])
+    except Exception:
+        meta = {}
+
+    pfc = meta.get("personal_finance_category") or {}
+    pfc_primary = (pfc.get("primary") or "").upper()
+    pfc_detailed = (pfc.get("detailed") or "").upper()
+
+    text = f"{name} {merchant}".strip()
+    has_transfer_hints = any(h in text for h in _TRANSFER_HINTS)
+
+    # 1) Strong exclude: Plaid explicitly says credit card payment
+    if "CREDIT_CARD_PAYMENT" in pfc_detailed:
+        return 1, "pfc_credit_card_payment", merch_norm
+
+    # 2) Transfers: require BOTH (category suggests transfer) AND (text hints OR empty merchant)
+    is_transfer_category = (
+        "ACCOUNT_TRANSFER" in pfc_detailed
+        or pfc_primary in ("TRANSFER_IN", "TRANSFER_OUT")
+    )
+
+    merchant_present = bool(merchant) or bool(txn_row.get("merchant_name"))
+    if is_transfer_category and (has_transfer_hints or not merchant_present):
+        return 1, "pfc_transfer_with_transfer_text", merch_norm
+
+    # 3) Heuristic fallback (no/weak PFC):
+    # if it screams payment/transfer, exclude
+    if has_transfer_hints and (("card" in text) or ("bank" in text) or ("payment" in text) or ("pmt" in text)):
+        return 1, "text_looks_like_payment_or_transfer", merch_norm
+
+    return 0, None, merch_norm
+
+
 # ------------------------------------------------------------
 #  Plaid API Routes
 # ------------------------------------------------------------
@@ -235,10 +311,20 @@ def link_token_create():
         webhook = os.getenv("PLAID_WEBHOOK_URL")
         req = LinkTokenCreateRequest(
             products=[Products("transactions")],
+            additional_consented_products=[
+                Products("liabilities"),
+                Products("investments"),
+                Products("recurring_transactions"),
+                # Enrich + Transactions Refresh are “endpoint billed” features;
+                # consent handling depends on your Plaid setup, but this is the right place to include if supported.
+                Products("transactions_refresh"),
+                Products("enrich"),
+            ],
             client_name="Personal Finance App",
             country_codes=[CountryCode("US")],
             language="en",
-            user=LinkTokenCreateRequestUser(client_user_id=str(time.time())),
+            client_user_id = os.getenv("APP_USER_ID", "local_user"),
+            user=LinkTokenCreateRequestUser(client_user_id=os.getenv("APP_USER_ID", "local_user")),
             link_customization_name="data_transparency_messaging",
             webhook=webhook,
         )
@@ -268,10 +354,20 @@ def link_token_update():
         webhook = os.getenv("PLAID_WEBHOOK_URL")
         req = LinkTokenCreateRequest(
             products=[Products("transactions")],
+            additional_consented_products=[
+                Products("liabilities"),
+                Products("investments"),
+                Products("recurring_transactions"),
+                # Enrich + Transactions Refresh are “endpoint billed” features;
+                # consent handling depends on your Plaid setup, but this is the right place to include if supported.
+                Products("transactions_refresh"),
+                Products("enrich"),
+            ],
             client_name="Personal Finance App",
             country_codes=[CountryCode("US")],
             language="en",
-            user=LinkTokenCreateRequestUser(client_user_id=str(time.time())),
+            client_user_id = os.getenv("APP_USER_ID", "local_user"),
+            user=LinkTokenCreateRequestUser(client_user_id=os.getenv("APP_USER_ID", "local_user")),
             access_token=item["access_token"],  # UPDATE MODE
             webhook=webhook,
         )
@@ -468,6 +564,68 @@ def get_transactions():
         return jsonify({"error": str(e)}), 400
 
 
+
+@app.route("/liabilities", methods=["GET"])
+def liabilities_get():
+    try:
+        items = get_all_items()
+        if not items:
+            return jsonify({"error": "No linked items yet"}), 400
+
+        out = []
+        for item in items:
+            item_id = item["item_id"]
+            access_token = item["access_token"]
+
+            req = LiabilitiesGetRequest(access_token=access_token)
+            res = client.liabilities_get(req).to_dict()
+            capture_plaid_raw("liabilities/get", item_id, res)
+
+            upsert_liabilities_raw(item_id, res)
+            out.append({"item_id": item_id, "ok": True})
+
+        return jsonify({"ok": True, "items": out})
+    except Exception as e:
+        log_app(f"Error in /liabilities: {e}", "error")
+        return jsonify({"error": str(e)}), 400   
+
+
+@app.route("/recurring", methods=["GET"])
+def recurring_get():
+    try:
+        items = get_all_items()
+        if not items:
+            return jsonify({"error": "No linked items yet"}), 400
+
+        out = []
+        for item in items:
+            item_id = item["item_id"]
+            access_token = item["access_token"]
+
+            req = TransactionsRecurringGetRequest(access_token=access_token)
+            res = client.transactions_recurring_get(req).to_dict()
+            capture_plaid_raw("transactions/recurring/get", item_id, res)
+
+            upsert_recurring_raw(item_id, res)
+            out.append({"item_id": item_id, "ok": True})
+
+        return jsonify({"ok": True, "items": out})
+    except Exception as e:
+        log_app(f"Error in /recurring: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/recurring/raw", methods=["GET"])
+def recurring_raw_get():
+    try:
+        item_id = request.args.get("item_id")  # optional
+        rows = get_recurring_raw(item_id=item_id)
+        return jsonify({"count": len(rows), "rows": rows})
+    except Exception as e:
+        log_app(f"Error in /recurring/raw: {e}", "error")
+        return jsonify({"error": str(e)}), 400    
+
+
 def _sync_accounts_for_items(items: list[dict]) -> dict:
     """
     Best-effort accounts sync:
@@ -637,6 +795,226 @@ def _sync_transactions_for_items(items: list[dict], count: int = 500) -> dict:
             })
 
     return {"items": results, "errors": errors}
+
+
+#@app.route("/classify", methods=["POST"])
+#def classify():
+#    payload = request.json or {}
+#    days = int(payload.get("days", 365))
+#    item_id = payload.get("item_id")
+#    res = apply_classification_rules(days=days, item_id=item_id)
+#    return jsonify({"ok": True, **res})
+
+@app.route("/spend/top_merchants", methods=["GET"])
+def top_merchants():
+    days = int(request.args.get("days", "30"))
+    limit = int(request.args.get("limit", "50"))
+    return jsonify({"ok": True, "days": days, "rows": get_top_merchants(days=days, limit=limit)})
+
+
+@app.route("/liabilities/credit_summary", methods=["GET"])
+def credit_summary():
+    item_id = request.args.get("item_id")
+    rows = get_credit_card_statement_summary(item_id=item_id)
+    return jsonify({"ok": True, "count": len(rows), "rows": rows})
+
+@app.route("/classify", methods=["POST"])
+def classify_transactions():
+    """
+    Classifies transactions and upserts transaction_classifications.
+    Body (optional):
+      { "days": 365, "item_id": "..." }
+    """
+    try:
+        payload = request.json or {}
+        days = int(payload.get("days", 365))
+        item_id = payload.get("item_id")
+
+        rows = get_transactions_for_classification(days=days, item_id=item_id)
+
+        updated = 0
+        excluded = 0
+
+        for r in rows:
+            tid = r.get("transaction_id")
+            if not tid:
+                continue
+
+            ex, reason, merch_norm = classify_one(r)
+            upsert_transaction_classification(
+                transaction_id=tid,
+                exclude_from_spend=ex,
+                exclude_reason=reason,
+                merchant_normalized=merch_norm,
+            )
+            updated += 1
+            excluded += int(ex)
+
+        return jsonify({
+            "ok": True,
+            "days": days,
+            "item_id": item_id,
+            "classified": updated,
+            "excluded_from_spend": excluded,
+        })
+
+    except Exception as e:
+        log_app(f"Error in /classify: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/spend", methods=["GET"])
+def spend_get():
+    """
+    Returns spend transactions (amount > 0).
+    Query params:
+      days=30
+      item_id=...
+      account_id=...
+      include_excluded=0|1
+      limit=500
+      offset=0
+    """
+    try:
+        items = get_all_items()
+        if not items:
+            return jsonify({"error": "No linked items yet"}), 400
+
+        days = int(request.args.get("days", "30"))
+        item_id = request.args.get("item_id")
+        account_id = request.args.get("account_id")
+        include_excluded = request.args.get("include_excluded", "0") == "1"
+        limit = int(request.args.get("limit", "500"))
+        offset = int(request.args.get("offset", "0"))
+
+        rows = get_spend_canonical(
+            days=days,
+            item_id=item_id,
+            account_id=account_id,
+            include_excluded=include_excluded,
+            limit=limit,
+            offset=offset,
+        )
+        return jsonify({"count": len(rows), "spend": rows})
+
+    except Exception as e:
+        log_app(f"Error in /spend: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/transactions/<transaction_id>/classify", methods=["POST"])
+def classify_transaction(transaction_id: str):
+    """
+    Manual classification override for a single transaction.
+    Optionally saves a merchant rule for future auto-classification.
+
+    Body JSON example:
+    {
+      "exclude_from_spend": 0,
+      "exclude_reason": "user: subscription",
+      "user_category": "Subscriptions",
+      "user_subcategory": "AI",
+      "merchant_normalized": "openai chatgpt",
+      "save_rule": true,
+      "rule_scope": "account",          // 'account' or 'global'
+      "match_field": "either",          // 'merchant_name' | 'name' | 'either'
+      "match_op": "contains",           // 'equals' | 'contains'
+      "priority": 50
+    }
+    """
+    try:
+        payload = request.json or {}
+
+        tx = get_transaction_basic(transaction_id)
+        if not tx:
+            return jsonify({"error": f"Unknown transaction_id: {transaction_id}"}), 404
+
+        exclude_from_spend = int(bool(payload.get("exclude_from_spend", 0)))
+        exclude_reason = payload.get("exclude_reason")
+        user_category = payload.get("user_category")
+        user_subcategory = payload.get("user_subcategory")
+
+        # If merchant_normalized not provided, derive from merchant_name/name
+        merchant_norm = payload.get("merchant_normalized")
+        if not merchant_norm:
+            merchant_norm = normalize_merchant(tx.get("merchant_name") or tx.get("name"))
+
+        # 1) Apply manual override
+        upsert_transaction_classification(
+            transaction_id=transaction_id,
+            exclude_from_spend=exclude_from_spend,
+            exclude_reason=exclude_reason,
+            user_category=user_category,
+            user_subcategory=user_subcategory,
+            merchant_normalized=merchant_norm,
+        )
+
+        rule_id = None
+
+        # 2) Optionally save as rule
+        if bool(payload.get("save_rule", False)):
+            rule_scope = (payload.get("rule_scope") or "account").lower()  # account/global
+            match_field = (payload.get("match_field") or "either").lower()
+            match_op = (payload.get("match_op") or "contains").lower()
+            priority = int(payload.get("priority", 100))
+
+            scoped_account_id = tx["account_id"] if rule_scope == "account" else None
+
+            # The rule "match_value" is normalized; for contains match,
+            # you can pass shorter tokens too. We'll default to merchant_norm.
+            match_value = normalize_merchant(payload.get("match_value") or merchant_norm)
+
+            rule_id = insert_classification_rule(
+                match_field=match_field,
+                match_op=match_op,
+                match_value=match_value,
+                account_id=scoped_account_id,
+                exclude_from_spend=exclude_from_spend,
+                exclude_reason=exclude_reason,
+                user_category=user_category,
+                user_subcategory=user_subcategory,
+                merchant_normalized=merchant_norm,
+                priority=priority,
+            )
+
+        return jsonify({
+            "ok": True,
+            "transaction_id": transaction_id,
+            "applied_override": {
+                "exclude_from_spend": exclude_from_spend,
+                "exclude_reason": exclude_reason,
+                "user_category": user_category,
+                "user_subcategory": user_subcategory,
+                "merchant_normalized": merchant_norm,
+            },
+            "saved_rule_id": rule_id,
+            "tx_context": {
+                "account_id": tx["account_id"],
+                "merchant_name": tx.get("merchant_name"),
+                "name": tx.get("name"),
+            }
+        })
+
+    except Exception as e:
+        log_app(f"Error in classify_transaction: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/rules/apply", methods=["POST"])
+def rules_apply():
+    """
+    Apply saved rules to past transactions (does NOT overwrite manual overrides).
+    Body JSON:
+      { "days": 365, "item_id": null }
+    """
+    try:
+        payload = request.json or {}
+        days = int(payload.get("days", 365))
+        item_id = payload.get("item_id")
+
+        res = apply_rules_bulk(days=days, item_id=item_id)
+        return jsonify({"ok": True, **res})
+
+    except Exception as e:
+        log_app(f"Error in /rules/apply: {e}", "error")
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/sync_all", methods=["POST"])

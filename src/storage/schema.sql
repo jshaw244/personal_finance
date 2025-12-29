@@ -159,6 +159,87 @@ CREATE TABLE IF NOT EXISTS transaction_cursors (
     FOREIGN KEY (item_id) REFERENCES items(item_id) ON DELETE CASCADE
 );
 
+
+-- Store the full Plaid transaction payload (or selected subset) for rules/classification
+CREATE TABLE IF NOT EXISTS transaction_meta (
+  transaction_id TEXT PRIMARY KEY,
+  item_id        TEXT NOT NULL,
+  payload_json   TEXT NOT NULL,
+  updated_at     TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (item_id) REFERENCES items(item_id) ON DELETE CASCADE
+  FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_meta_item_id ON transaction_meta(item_id);
+
+-- Your app-side classification + flags
+CREATE TABLE IF NOT EXISTS transaction_classifications (
+  transaction_id        TEXT PRIMARY KEY,
+  exclude_from_spend    INTEGER DEFAULT 0,
+  exclude_reason        TEXT,
+  user_category         TEXT,
+  user_subcategory      TEXT,
+  merchant_normalized   TEXT,
+  updated_at            TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_txn_classifications_exclude ON transaction_classifications(exclude_from_spend);
+
+
+CREATE TABLE IF NOT EXISTS liabilities_raw (
+  item_id      TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  captured_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (item_id) REFERENCES items(item_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS recurring_raw (
+  item_id      TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  captured_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (item_id) REFERENCES items(item_id) ON DELETE CASCADE
+);
+
+-- ------------------------------------------------------------
+-- Classification rules (merchant-based)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS classification_rules (
+  rule_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  enabled             INTEGER DEFAULT 1,
+  priority            INTEGER DEFAULT 100,              -- lower runs first
+
+  -- Match inputs
+  match_field         TEXT NOT NULL,                    -- 'merchant_name' | 'name' | 'either'
+  match_op            TEXT NOT NULL,                    -- 'equals' | 'contains'
+  match_value         TEXT NOT NULL,                    -- normalized value
+
+  -- Optional scope (null = all accounts)
+  account_id          TEXT,
+
+  -- Outputs
+  exclude_from_spend  INTEGER DEFAULT 0,
+  exclude_reason      TEXT,
+  user_category       TEXT,
+  user_subcategory    TEXT,
+  merchant_normalized TEXT,
+
+  created_at          TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_class_rules_enabled_priority
+  ON classification_rules(enabled, priority);
+
+CREATE INDEX IF NOT EXISTS idx_class_rules_match
+  ON classification_rules(match_value, match_op, match_field);
+
+CREATE INDEX IF NOT EXISTS idx_class_rules_account
+  ON classification_rules(account_id);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_date_amount
+ON transactions(date, amount);
+
 -- ============================================================
 -- End of schema.sql
 -- ============================================================
