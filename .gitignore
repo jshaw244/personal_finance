@@ -46,3 +46,9 @@ data/*.db
 
 # Snapshots
 runs/snapshots/
+
+# Generated run artifacts
+runs/run_main_*.ps1
+
+# Generated report template outputs
+src/presentation/templates/reports_index_*.html
