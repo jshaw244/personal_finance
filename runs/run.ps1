@@ -24,6 +24,8 @@ param(
     [string]$Target,
 
     [switch]$Maintenance,
+    [switch]$FlaskDebug,
+    [switch]$NoPlaid, # no ngrok use either
     [switch]$IncludeAnalysis,
     [int]$AnalysisDays = 30,
     [string]$AnalysisStart = "",
@@ -151,6 +153,7 @@ $env:PLAID_ENV      = $Target
 $env:FLASK_RUN_PORT = $port
 $env:PYTHONPATH     = $ProjectRoot
 
+
 python --version | Out-Null
 if (-not (Test-Path ".\.venv")) {
     Write-Host "Creating virtual environment (.venv)..." -ForegroundColor Cyan
@@ -161,6 +164,23 @@ if (-not (Test-Path ".\.venv")) {
 if (-not (Test-Path ".\src\requirements.txt")) {
     throw "Missing .\src\requirements.txt"
 }
+
+# ----------------------------
+# Debug / Plaid toggles
+# ----------------------------
+if ($FlaskDebug) {
+    $env:FLASK_DEBUG = "1"
+} else {
+    Remove-Item Env:FLASK_DEBUG -ErrorAction SilentlyContinue
+}
+
+if ($NoPlaid) {
+    $env:PLAID_DISABLED = "1"
+} else {
+    Remove-Item Env:PLAID_DISABLED -ErrorAction SilentlyContinue
+}
+
+
 
 # -------------------------------------------------------------------
 # Backup database & schema (per-env naming)
@@ -198,7 +218,8 @@ if (Test-Path $schemaFile) {
 # -------------------------------------------------------------------
 if (Test-Path $WatcherScript) {
     Write-Host "Launching schema watcher..."
-    Start-Process pwsh -ArgumentList "-NoExit", "-File", "`"$WatcherScript`""
+    #Start-Process pwsh -ArgumentList "-NoExit", "-File", "`"$WatcherScript`""
+    Start-Process pwsh -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$WatcherScript`""
 } else {
     Write-Host "Warning: Schema watcher not found at $WatcherScript" -ForegroundColor Yellow
 }
@@ -207,7 +228,13 @@ if (Test-Path $WatcherScript) {
 # Launch Flask app + ngrok
 # -------------------------------------------------------------------
 $publicUrl = $null
-if (Get-Command ngrok -ErrorAction SilentlyContinue) {
+if ($FlaskDebug) {
+    Write-Host "Debug mode enabled: skipping ngrok to avoid exposing the debugger." -ForegroundColor Yellow
+}
+elseif ($NoPlaid) {
+    Write-Host "NoPlaid mode enabled: skipping ngrok/webhooks." -ForegroundColor Yellow
+}
+elseif (Get-Command ngrok -ErrorAction SilentlyContinue) {
     $ng = Get-Process ngrok -ErrorAction SilentlyContinue
     if ($ng) { $ng | Stop-Process -Force }
     Write-Host "Starting ngrok tunnel (port $port)..."
@@ -233,6 +260,12 @@ $flaskTitle = "personal_finance [$Target] - Flask App"
 # Capture webhook URL (may be $null)
 $webhookUrl = $env:PLAID_WEBHOOK_URL
 
+$runLine = if ($FlaskDebug) {
+    "python -m flask --app src.ingestion.app run --debug --host 127.0.0.1 --port $port"
+} else {
+    "python -m src.ingestion.app"
+}
+
 $flaskCmd = @"
 [Console]::Title = '$flaskTitle';
 `$Host.UI.RawUI.WindowTitle = '$flaskTitle';
@@ -242,9 +275,17 @@ $flaskCmd = @"
 `$env:FLASK_RUN_PORT = '$port';
 `$env:PYTHONPATH     = '$ProjectRoot';
 `$env:PLAID_WEBHOOK_URL = '$webhookUrl';
-python -m src.ingestion.app
+`$env:PLAID_DISABLED = '$($env:PLAID_DISABLED)';
+`$env:FLASK_DEBUG    = '$($env:FLASK_DEBUG)';
+$runLine
 "@
-Start-Process pwsh -ArgumentList "-NoExit", "-Command", $flaskCmd
+$flaskArgs = if ($FlaskDebug) {
+  @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $flaskCmd)
+} else {
+  @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $flaskCmd)
+}
+Start-Process pwsh -ArgumentList $flaskArgs
+
 Start-Sleep -Seconds 3
 
 # -------------------------------------------------------------------
@@ -267,7 +308,9 @@ python -m src.ingestion.debug_db schema
 python -m src.ingestion.debug_db logs 20
 "@ | Out-File -FilePath $debugScript -Encoding UTF8 -Force
 
-Start-Process pwsh -ArgumentList "-NoExit", "-File", "`"$debugScript`""
+#Start-Process pwsh -ArgumentList "-NoExit", "-File", "`"$debugScript`""
+Start-Process pwsh -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$debugScript`""
+
 
 # -------------------------------------------------------------------
 # Optional analysis
