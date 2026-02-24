@@ -28,3 +28,21 @@ pandoc-3.8.2-windows-x86_64.msi
 # Environment and credentials
 .env*
 config/env/.env*
+
+# Plaid raw ingestion
+data/raw/
+
+# Runtime artifacts
+runs/.pids/
+
+# VS Code
+.vscode/
+
+# Local databases
+data/*.db
+
+# Macrium images
+*.mrimg
+
+# Snapshots
+runs/snapshots/
