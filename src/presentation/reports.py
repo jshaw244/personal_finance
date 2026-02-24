@@ -16,10 +16,12 @@ from flask import (
     Blueprint, render_template, send_from_directory, abort,
     jsonify, request, redirect, url_for, flash, current_app
 )
+
 from flask_login import (
     LoginManager, UserMixin, login_user, logout_user,
     login_required, current_user
 )
+
 from flask import session
 #session.permanent = True
 from pathlib import Path
@@ -1385,36 +1387,36 @@ def api_debug_state():
     })
 
 
-# -------------------------------------------------------------------
-# M5: Password generator (utility only; no vault storage)
-# -------------------------------------------------------------------
-@reports_bp.route("/api/password_generate")
-@login_required
-def api_password_generate():
-    """
-    Generate a strong random password.
-    Query params:
-      length (default 16), special=true|false
-    """
-    length = max(8, min(128, int(request.args.get("length", "16"))))
-    use_special = request.args.get("special", "true").lower() != "false"
+# # -------------------------------------------------------------------
+# # M5: Password generator (utility only; no vault storage)
+# # -------------------------------------------------------------------
+# @reports_bp.route("/api/password_generate")
+# @login_required
+# def api_password_generate():
+#     """
+#     Generate a strong random password.
+#     Query params:
+#       length (default 16), special=true|false
+#     """
+#     length = max(8, min(128, int(request.args.get("length", "16"))))
+#     use_special = request.args.get("special", "true").lower() != "false"
 
-    letters = string.ascii_letters
-    digits = string.digits
-    specials = "!@#$%^&*()-_=+[]{};:,.?/"
+#     letters = string.ascii_letters
+#     digits = string.digits
+#     specials = "!@#$%^&*()-_=+[]{};:,.?/"
 
-    pool = letters + digits + (specials if use_special else "")
-    if not pool:
-        pool = letters + digits
+#     pool = letters + digits + (specials if use_special else "")
+#     if not pool:
+#         pool = letters + digits
 
-    # Guarantee at least one from each class when possible
-    pw = []
-    pw.append(random.choice(string.ascii_lowercase))
-    pw.append(random.choice(string.ascii_uppercase))
-    pw.append(random.choice(string.digits))
-    if use_special:
-        pw.append(random.choice(specials))
-    while len(pw) < length:
-        pw.append(random.choice(pool))
-    random.shuffle(pw)
-    return jsonify({"password": "".join(pw[:length])})
+#     # Guarantee at least one from each class when possible
+#     pw = []
+#     pw.append(random.choice(string.ascii_lowercase))
+#     pw.append(random.choice(string.ascii_uppercase))
+#     pw.append(random.choice(string.digits))
+#     if use_special:
+#         pw.append(random.choice(specials))
+#     while len(pw) < length:
+#         pw.append(random.choice(pool))
+#     random.shuffle(pw)
+#     return jsonify({"password": "".join(pw[:length])})

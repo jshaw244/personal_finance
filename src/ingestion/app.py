@@ -16,6 +16,7 @@ import plaid
 import re
 
 from datetime import timedelta
+from functools import wraps
 
 from flask import Flask, jsonify, request, make_response
 from plaid.api import plaid_api
@@ -81,6 +82,8 @@ cfg = load_env(ENV_TARGET)
 # ------------------------------------------------------------
 #  Plaid Client Setup
 # ------------------------------------------------------------
+
+
 PLAID_CLIENT_ID = os.getenv("PLAID_CLIENT_ID")
 PLAID_SECRET = os.getenv("PLAID_SECRET")
 PLAID_ENV = (os.getenv("PLAID_ENV") or "sandbox").lower()
@@ -100,13 +103,26 @@ print(
     " plaid_host=",
     plaid_host,
 )
+PLAID_DISABLED = os.getenv("PLAID_DISABLED", "0") == "1"
+client = None
 
-configuration = plaid.Configuration(
-    host=plaid_host,
-    api_key={"clientId": PLAID_CLIENT_ID, "secret": PLAID_SECRET},
-)
-api_client = plaid.ApiClient(configuration)
-client = plaid_api.PlaidApi(api_client)
+def require_plaid(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if PLAID_DISABLED:
+            return jsonify({"error": "Plaid is disabled (PLAID_DISABLED=1)"}), 503
+        return fn(*args, **kwargs)
+    return wrapper
+
+if not PLAID_DISABLED:
+    configuration = plaid.Configuration(
+        host=plaid_host,
+        api_key={"clientId": PLAID_CLIENT_ID, "secret": PLAID_SECRET},
+    )
+    api_client = plaid.ApiClient(configuration)
+    client = plaid_api.PlaidApi(api_client)
+else:
+    print("PLAID_DISABLED=1 -> Plaid client not initialized")
 
 # ------------------------------------------------------------
 #  Flask App + Blueprints
@@ -306,6 +322,7 @@ def classify_one(txn_row: dict) -> tuple[int, str | None, str | None]:
 #  Plaid API Routes
 # ------------------------------------------------------------
 @app.route("/link_token/create", methods=["POST"])
+@require_plaid
 def link_token_create():
     try:
         webhook = os.getenv("PLAID_WEBHOOK_URL")
@@ -336,6 +353,7 @@ def link_token_create():
 
 
 @app.route("/link_token/update", methods=["POST"])
+@require_plaid
 def link_token_update():
     """
     Create a Link token in UPDATE MODE for an existing item.
@@ -379,6 +397,7 @@ def link_token_update():
 
 
 @app.route("/item/public_token/exchange", methods=["POST"])
+@require_plaid
 def item_public_token_exchange():
     """
     Expects JSON:
@@ -483,6 +502,7 @@ def list_items():
 
 
 @app.route("/item/remove", methods=["POST"])
+@require_plaid
 def item_remove():
     """
     Removes an item in Plaid AND deletes local rows (cascade) so we avoid "already linked" issues.
@@ -566,6 +586,7 @@ def get_transactions():
 
 
 @app.route("/liabilities", methods=["GET"])
+@require_plaid
 def liabilities_get():
     try:
         items = get_all_items()
@@ -591,6 +612,7 @@ def liabilities_get():
 
 
 @app.route("/recurring", methods=["GET"])
+@require_plaid
 def recurring_get():
     try:
         items = get_all_items()
@@ -1018,6 +1040,7 @@ def rules_apply():
 
 
 @app.route("/sync_all", methods=["POST"])
+@require_plaid
 def sync_all():
     """
     1) Sync accounts for ALL items
