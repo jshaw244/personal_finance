@@ -64,6 +64,8 @@ from src.storage.db import (
     get_recurring_raw,
     get_transactions_for_classification,
     upsert_transaction_classification,
+    upsert_transaction_classifications_batch,
+    get_connection,
     get_spend_canonical,
     get_transaction_basic,
     normalize_merchant,
@@ -269,14 +271,34 @@ _TRANSFER_HINTS = (
     "initiate", "initiated payment",
 )
 
-def classify_one(txn_row: dict) -> tuple[int, str | None, str | None]:
+_PFC_CATEGORY_MAP = {
+    "FOOD_AND_DRINK":            "Food & Drink",
+    "GENERAL_MERCHANDISE":       "Shopping",
+    "ENTERTAINMENT":             "Entertainment",
+    "TRAVEL":                    "Travel",
+    "INCOME":                    "Income",
+    "LOAN_PAYMENTS":             "Loan Payments",
+    "TRANSFER_IN":               "Transfer In",
+    "TRANSFER_OUT":              "Transfer Out",
+    "RENT_AND_UTILITIES":        "Utilities",
+    "MEDICAL":                   "Medical",
+    "GENERAL_SERVICES":          "Services",
+    "TRANSPORTATION":            "Transportation",
+    "PERSONAL_CARE":             "Personal Care",
+    "HOME_IMPROVEMENT":          "Home Improvement",
+    "GOVERNMENT_AND_NON_PROFIT": "Government",
+    "BANK_FEES":                 "Bank Fees",
+}
+
+def classify_one(txn_row: dict) -> tuple[int, str | None, str | None, str | None]:
     """
-    Returns: (exclude_from_spend, exclude_reason, merchant_normalized)
+    Returns: (exclude_from_spend, exclude_reason, merchant_normalized, user_category)
 
     Policy (loose v1):
       - Exclude definite credit card payments
       - Exclude transfers ONLY when text also looks like a transfer/payment
       - Do NOT exclude just because Plaid labeled it TRANSFER_* if merchant looks real
+      - Maps Plaid personal_finance_category.primary to a friendly user_category label
     """
     name = (txn_row.get("name") or "").lower()
     merchant = (txn_row.get("merchant_name") or "").lower()
@@ -296,9 +318,11 @@ def classify_one(txn_row: dict) -> tuple[int, str | None, str | None]:
     text = f"{name} {merchant}".strip()
     has_transfer_hints = any(h in text for h in _TRANSFER_HINTS)
 
+    user_category = _PFC_CATEGORY_MAP.get(pfc_primary)
+
     # 1) Strong exclude: Plaid explicitly says credit card payment
     if "CREDIT_CARD_PAYMENT" in pfc_detailed:
-        return 1, "pfc_credit_card_payment", merch_norm
+        return 1, "pfc_credit_card_payment", merch_norm, user_category
 
     # 2) Transfers: require BOTH (category suggests transfer) AND (text hints OR empty merchant)
     is_transfer_category = (
@@ -308,14 +332,14 @@ def classify_one(txn_row: dict) -> tuple[int, str | None, str | None]:
 
     merchant_present = bool(merchant) or bool(txn_row.get("merchant_name"))
     if is_transfer_category and (has_transfer_hints or not merchant_present):
-        return 1, "pfc_transfer_with_transfer_text", merch_norm
+        return 1, "pfc_transfer_with_transfer_text", merch_norm, user_category
 
     # 3) Heuristic fallback (no/weak PFC):
     # if it screams payment/transfer, exclude
     if has_transfer_hints and (("card" in text) or ("bank" in text) or ("payment" in text) or ("pmt" in text)):
-        return 1, "text_looks_like_payment_or_transfer", merch_norm
+        return 1, "text_looks_like_payment_or_transfer", merch_norm, user_category
 
-    return 0, None, merch_norm
+    return 0, None, merch_norm, user_category
 
 
 # ------------------------------------------------------------
@@ -331,16 +355,10 @@ def link_token_create():
             additional_consented_products=[
                 Products("liabilities"),
                 Products("investments"),
-                Products("recurring_transactions"),
-                # Enrich + Transactions Refresh are “endpoint billed” features;
-                # consent handling depends on your Plaid setup, but this is the right place to include if supported.
-                Products("transactions_refresh"),
-                Products("enrich"),
             ],
             client_name="Personal Finance App",
             country_codes=[CountryCode("US")],
             language="en",
-            client_user_id = os.getenv("APP_USER_ID", "local_user"),
             user=LinkTokenCreateRequestUser(client_user_id=os.getenv("APP_USER_ID", "local_user")),
             link_customization_name="data_transparency_messaging",
             webhook=webhook,
@@ -375,16 +393,10 @@ def link_token_update():
             additional_consented_products=[
                 Products("liabilities"),
                 Products("investments"),
-                Products("recurring_transactions"),
-                # Enrich + Transactions Refresh are “endpoint billed” features;
-                # consent handling depends on your Plaid setup, but this is the right place to include if supported.
-                Products("transactions_refresh"),
-                Products("enrich"),
             ],
             client_name="Personal Finance App",
             country_codes=[CountryCode("US")],
             language="en",
-            client_user_id = os.getenv("APP_USER_ID", "local_user"),
             user=LinkTokenCreateRequestUser(client_user_id=os.getenv("APP_USER_ID", "local_user")),
             access_token=item["access_token"],  # UPDATE MODE
             webhook=webhook,
@@ -840,46 +852,46 @@ def credit_summary():
     rows = get_credit_card_statement_summary(item_id=item_id)
     return jsonify({"ok": True, "count": len(rows), "rows": rows})
 
+def _run_classify(days: int = 500, item_id: str | None = None) -> dict:
+    """
+    Shared classify logic: reads transactions+meta, writes to transaction_classifications.
+    Batches all writes into a single transaction to avoid repeated write-lock acquisition.
+    Called by both the /classify route and sync_all.
+    """
+    rows = get_transactions_for_classification(days=days, item_id=item_id)
+    batch = []
+    excluded = 0
+    for r in rows:
+        tid = r.get("transaction_id")
+        if not tid:
+            continue
+        ex, reason, merch_norm, user_category = classify_one(r)
+        batch.append({
+            "transaction_id": tid,
+            "exclude_from_spend": ex,
+            "exclude_reason": reason,
+            "merchant_normalized": merch_norm,
+            "user_category": user_category,
+            "user_subcategory": None,
+        })
+        excluded += int(ex)
+    written = upsert_transaction_classifications_batch(batch)
+    return {"classified": written, "excluded_from_spend": excluded}
+
+
 @app.route("/classify", methods=["POST"])
 def classify_transactions():
     """
     Classifies transactions and upserts transaction_classifications.
     Body (optional):
-      { "days": 365, "item_id": "..." }
+      { "days": 500, "item_id": "..." }
     """
     try:
         payload = request.json or {}
-        days = int(payload.get("days", 365))
+        days = int(payload.get("days", 500))
         item_id = payload.get("item_id")
-
-        rows = get_transactions_for_classification(days=days, item_id=item_id)
-
-        updated = 0
-        excluded = 0
-
-        for r in rows:
-            tid = r.get("transaction_id")
-            if not tid:
-                continue
-
-            ex, reason, merch_norm = classify_one(r)
-            upsert_transaction_classification(
-                transaction_id=tid,
-                exclude_from_spend=ex,
-                exclude_reason=reason,
-                merchant_normalized=merch_norm,
-            )
-            updated += 1
-            excluded += int(ex)
-
-        return jsonify({
-            "ok": True,
-            "days": days,
-            "item_id": item_id,
-            "classified": updated,
-            "excluded_from_spend": excluded,
-        })
-
+        result = _run_classify(days=days, item_id=item_id)
+        return jsonify({"ok": True, "days": days, "item_id": item_id, **result})
     except Exception as e:
         log_app(f"Error in /classify: {e}", "error")
         return jsonify({"error": str(e)}), 400
@@ -1057,13 +1069,14 @@ def sync_all():
 
         acct_out = _sync_accounts_for_items(items)
         txn_out = _sync_transactions_for_items(items, count=500)
+        classify_out = _run_classify(days=500)
 
         elapsed_ms = int((time.time() - started) * 1000)
 
         canonical_accounts_count = len(get_accounts_canonical())
         canonical_txn_count_30d = count_transactions_canonical(days=30)
 
-        log_app(f"/sync_all END elapsed_ms={elapsed_ms}")
+        log_app(f"/sync_all END elapsed_ms={elapsed_ms} classified={classify_out['classified']}")
 
         return jsonify({
             "ok": True,
@@ -1081,6 +1094,7 @@ def sync_all():
                 "total_modified": sum(r.get("modified", 0) for r in txn_out["items"]),
                 "total_removed": sum(r.get("removed", 0) for r in txn_out["items"]),
             },
+            "classify": classify_out,
             "canonical_counts": {
                 "accounts_count": canonical_accounts_count,
                 "transactions_last_30d_count": canonical_txn_count_30d,
@@ -1093,6 +1107,80 @@ def sync_all():
     except Exception as e:
         log_app(f"Error in /sync_all: {e}", "error")
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/resync_full", methods=["POST"])
+@require_plaid
+def resync_full():
+    """
+    Reset transaction sync cursors so Plaid re-sends every transaction
+    from scratch, repopulating transaction_meta for all historical records.
+
+    Body (optional):
+      { "item_id": "..." }   — only reset that item; omit to reset all items
+
+    WARNING: This re-downloads all transactions. Safe because save_transactions()
+    uses ON CONFLICT DO UPDATE, so no duplicates are created.
+    """
+    _step = "init"
+    try:
+        payload = request.json or {}
+        target_item_id = payload.get("item_id")
+
+        _step = "get_items"
+        items = get_all_items()
+        if not items:
+            return jsonify({"error": "No linked items"}), 400
+
+        if target_item_id:
+            items = [i for i in items if i["item_id"] == target_item_id]
+            if not items:
+                return jsonify({"error": f"item_id not found: {target_item_id}"}), 404
+
+        # Clear cursors — next sync call to Plaid will start from the beginning
+        _step = "clear_cursors"
+        with get_connection() as _conn:
+            if target_item_id:
+                _conn.execute(
+                    "DELETE FROM transaction_cursors WHERE item_id = ?",
+                    (target_item_id,),
+                )
+            else:
+                _conn.execute("DELETE FROM transaction_cursors")
+            _conn.commit()
+        # log AFTER commit so log_event_db doesn't contend for the write lock
+        if target_item_id:
+            log_app(f"/resync_full: cleared cursor for item_id={target_item_id}")
+        else:
+            log_app(f"/resync_full: cleared all {len(items)} cursors")
+
+        started = time.time()
+        _step = "sync_transactions"
+        txn_out = _sync_transactions_for_items(items, count=500)
+        _step = "classify"
+        classify_out = _run_classify(days=500)
+        elapsed_ms = int((time.time() - started) * 1000)
+
+        log_app(f"/resync_full END elapsed_ms={elapsed_ms} classified={classify_out['classified']}")
+
+        return jsonify({
+            "ok": True,
+            "items_reset": len(items),
+            "elapsed_ms": elapsed_ms,
+            "transactions_sync": {
+                "total_added": sum(r.get("added", 0) for r in txn_out["items"]),
+                "total_modified": sum(r.get("modified", 0) for r in txn_out["items"]),
+                "errors": txn_out["errors"],
+            },
+            "classify": classify_out,
+        })
+
+    except ApiException as e:
+        log_app(f"Plaid ApiException in /resync_full [{_step}]: {e}", "error")
+        return jsonify({"error": str(e), "step": _step}), 400
+    except Exception as e:
+        log_app(f"Error in /resync_full [{_step}]: {e}", "error")
+        return jsonify({"error": str(e), "step": _step}), 400
 
 
 # ------------------------------------------------------------
@@ -1122,6 +1210,7 @@ def index():
     <div style="margin-bottom: 1rem;">
         <button id="refresh-btn">Refresh data</button>
         <button id="add-bank-btn">Add bank</button>
+        <button id="resync-full-btn" title="Resets sync cursors and re-downloads all transactions to fill any missing data">Full Re-sync</button>
     </div>
 
     <div style="margin-bottom: 1rem;">
@@ -1145,6 +1234,7 @@ const refreshBtn = document.getElementById('refresh-btn');
 const addBtn = document.getElementById('add-bank-btn');
 const reconnectBtn = document.getElementById('reconnect-btn');
 const removeBtn = document.getElementById('remove-btn');
+const resyncFullBtn = document.getElementById('resync-full-btn');
 const itemSelect = document.getElementById('item-select');
 
 function log(obj) { out.textContent = JSON.stringify(obj, null, 2); }
@@ -1164,9 +1254,31 @@ function setBusy(busy, label) {
   addBtn.disabled = busy;
   reconnectBtn.disabled = busy;
   removeBtn.disabled = busy;
+  resyncFullBtn.disabled = busy;
   if (busy) setStatus(label || 'Working...');
   else setStatus(null);
 }
+
+resyncFullBtn.addEventListener('click', async () => {
+  if (!confirm('This resets all sync cursors and re-downloads every transaction from Plaid. Continue?')) return;
+  setBusy(true, 'Re-syncing all transactions from scratch…');
+  try {
+    const r = await fetch('/resync_full', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const j = await r.json();
+    log(j);
+    if (!r.ok) throw new Error(j.error || 'resync_full failed');
+    setStatus(`Done — ${j.transactions_sync.total_added} transactions synced, ${j.classify.classified} classified`);
+  } catch (e) {
+    log({ step: 'resync_full error', error: e.message });
+    setStatus('Re-sync failed: ' + e.message);
+  } finally {
+    resyncFullBtn.disabled = false;
+    refreshBtn.disabled = false;
+    addBtn.disabled = false;
+    reconnectBtn.disabled = false;
+    removeBtn.disabled = false;
+  }
+});
 
 async function loadItems() {
   const r = await fetch('/items');

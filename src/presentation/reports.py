@@ -162,9 +162,23 @@ def _load_tx_detail_from_excel(xlsx: Path) -> pd.DataFrame:
 def _load_tx_detail_from_db() -> pd.DataFrame:
     if not DB_PATH.exists():
         return pd.DataFrame()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
     try:
-        return pd.read_sql_query("SELECT * FROM transactions;", conn)
+        return pd.read_sql_query(
+            """
+            SELECT t.*,
+                   tc.user_category,
+                   tc.user_subcategory,
+                   COALESCE(tc.exclude_from_spend, 0) AS exclude_from_spend,
+                   tc.merchant_normalized
+            FROM transactions t
+            LEFT JOIN transaction_classifications tc
+              ON tc.transaction_id = t.transaction_id
+            """,
+            conn,
+        )
     finally:
         conn.close()
 
@@ -203,18 +217,7 @@ def _derive_category(name: str, merchant: str) -> str:
     return "Other"
 
 def _load_tx_detail() -> pd.DataFrame:
-    # In production, always use the live database
-    if ENV_TARGET == "production":
-        df = _load_tx_detail_from_db()
-    else:
-        # In sandbox/dev, prefer latest Excel snapshot, then fallback to DB
-        f = _latest_result_file()
-        if f and f.suffix.lower() == ".xlsx":
-            df = _load_tx_detail_from_excel(f)
-            if df.empty:
-                df = _load_tx_detail_from_db()
-        else:
-            df = _load_tx_detail_from_db()
+    df = _load_tx_detail_from_db()
 
     if df.empty:
         return df
@@ -223,22 +226,24 @@ def _load_tx_detail() -> pd.DataFrame:
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
-    if "category" not in df.columns:
-        df["category"] = None
-    df["category"] = df["category"].fillna("").replace("", None)
-    df["category"] = df["category"].replace(["None", "none"], None)
-
+    # Resolve category: prefer PFC-based classification, fall back to keyword derivation
     df["category"] = df.apply(
-        lambda r: _derive_category(
-            r.get("name", ""), 
+        lambda r: r.get("user_category") or _derive_category(
+            r.get("name", ""),
             r.get("merchant_name", "")
-        ) if not r.get("category") else r.get("category"),
+        ),
         axis=1,
     )
 
+    # Income flag: use PFC-derived category (set by classify_one) or Plaid amount sign on depository
+    df["is_income"] = df["category"].str.lower().eq("income")
+
+    # Ensure exclude_from_spend is numeric
+    df["exclude_from_spend"] = pd.to_numeric(df.get("exclude_from_spend", 0), errors="coerce").fillna(0).astype(int)
+
     if "amount" in df.columns:
-        df["spending_type"] = df["amount"].apply(
-            lambda x: "income" if x < 0 else "expense"
+        df["spending_type"] = df.apply(
+            lambda r: "income" if r["is_income"] else "expense", axis=1
         )
     else:
         df["spending_type"] = "unknown"
@@ -247,7 +252,7 @@ def _load_tx_detail() -> pd.DataFrame:
 def _load_tx_detail_db_only() -> pd.DataFrame:
     if not DB_PATH.exists():
         return pd.DataFrame()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
     try:
         return pd.read_sql_query("SELECT * FROM transactions;", conn)
     finally:
@@ -296,7 +301,7 @@ def ensure_summary_views_and_tables():
 
     # 1. Create/refresh built-in SQLite views
     try:
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = sqlite3.connect(str(DB_PATH), timeout=30)
         cur = conn.cursor()
         sql_view = """
 CREATE VIEW IF NOT EXISTS v_monthly_summary AS
@@ -384,12 +389,9 @@ def api_spending_by_category():
         return jsonify({"error": "no transaction detail available"}), 404
 
     df = df.copy()
-    df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
-        "payroll|deposit|refund|credit|reversal", case=False, na=False
-    )
 
-    # Expenses only, as positive "spend"
-    spend_df = df.loc[~df["is_income"]].copy()
+    # Expenses only: exclude income and transfers/CC payments
+    spend_df = df.loc[~df["is_income"] & (df["exclude_from_spend"] == 0)].copy()
     spend_df["spend"] = spend_df["amount"].abs()
 
     by_cat = (
@@ -413,12 +415,8 @@ def api_monthly_trend():
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])
 
-    df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
-        "payroll|deposit|refund|credit|reversal", case=False, na=False
-    )
-
-    # Expenses only, as positive spend
-    spend_df = df.loc[~df["is_income"]].copy()
+    # Expenses only: exclude income and transfers/CC payments
+    spend_df = df.loc[~df["is_income"] & (df["exclude_from_spend"] == 0)].copy()
     spend_df["spend"] = spend_df["amount"].abs()
     spend_df["month"] = spend_df["date"].dt.to_period("M").astype(str)
 
@@ -443,7 +441,8 @@ def api_top_merchants():
     merchant_col = "merchant_name" if "merchant_name" in df.columns else ("name" if "name" in df.columns else None)
     if not merchant_col:
         return jsonify({"error": "missing merchant column"}), 400
-    top = (df.groupby(merchant_col)["amount"]
+    spend_df = df.loc[~df["is_income"] & (df["exclude_from_spend"] == 0)]
+    top = (spend_df.groupby(merchant_col)["amount"]
            .sum().sort_values(ascending=False)
            .head(10).round(2).reset_index())
     top.columns = ["merchant", "amount"]
@@ -550,12 +549,9 @@ def api_kpi_summary():
     df = df[df["date"].notna()]
 
     df = df[df["amount"].notna()]
-    df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
-        "payroll|deposit|refund|credit|reversal", case=False, na=False
-    )
 
-    # Treat spending as positive
-    spend_df = df.loc[~df["is_income"]].copy()
+    # Treat spending as positive; exclude income and transfers/CC payments
+    spend_df = df.loc[~df["is_income"] & (df["exclude_from_spend"] == 0)].copy()
     spend_df["spend"] = spend_df["amount"].abs()
 
     total_spent = spend_df["spend"].sum()
@@ -594,12 +590,9 @@ def api_income_expense_split():
         return jsonify({"error": "no transaction data"}), 404
 
     df = df.copy()
-    df["is_income"] = df.get("merchant_name", "").fillna("").str.contains(
-        "payroll|deposit|refund|credit|reversal", case=False, na=False
-    )
 
-    income = df.loc[df["is_income"], "amount"].sum()
-    expenses = df.loc[~df["is_income"], "amount"].abs().sum()
+    income = df.loc[df["is_income"], "amount"].abs().sum()
+    expenses = df.loc[~df["is_income"] & (df["exclude_from_spend"] == 0), "amount"].abs().sum()
 
     net = income - expenses  # can ignore this on the frontend if you don't care about net right now
 
@@ -862,6 +855,170 @@ def _spend_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@reports_bp.route("/api/calendar_events")
+@login_required
+def api_calendar_events():
+    """
+    Return scheduled events (payday, transfers, bills) for a given month.
+    Query: ?month=YYYY-MM  (defaults to current month)
+    Returns: [{date, type, name, auto_pay?}, ...]
+    """
+    import calendar as _cal
+    from src.common.paths import PROJECT_ROOT
+
+    month_str = request.args.get("month", date.today().strftime("%Y-%m"))
+    try:
+        year, mon = map(int, month_str.split("-"))
+    except ValueError:
+        return jsonify({"error": "invalid month format"}), 400
+
+    _, days_in_month = _cal.monthrange(year, mon)
+    month_start = date(year, mon, 1)
+    month_end   = date(year, mon, days_in_month)
+
+    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+    with open(sched_path, encoding="utf-8") as f:
+        sched = json.load(f)
+
+    events = []
+
+    # ── Payday + transfers ────────────────────────────────────────────────────
+    anchor  = date.fromisoformat(sched["payday"]["anchor_date"])
+    cadence = sched["payday"]["cadence_days"]
+
+    # Walk anchor to the first payday we need to consider.
+    # We look back up to 6 days before month_start so a late-month payday
+    # whose transfer Monday falls inside this month is included.
+    scan_start = month_start - timedelta(days=6)
+    d = anchor
+    while d > month_end:
+        d -= timedelta(days=cadence)
+    while d + timedelta(days=cadence) <= scan_start:
+        d += timedelta(days=cadence)
+
+    while d <= month_end:
+        if month_start <= d <= month_end:
+            events.append({"date": d.isoformat(), "type": "payday", "name": "Payday"})
+
+        # Monday after payday (weekday Mon=0 … Fri=4 → +3 days)
+        days_to_mon  = (7 - d.weekday()) % 7 or 7
+        transfer_dt  = d + timedelta(days=days_to_mon)
+        if month_start <= transfer_dt <= month_end:
+            for t in sched["transfers"]:
+                events.append({"date": transfer_dt.isoformat(), "type": "transfer", "name": t["name"]})
+
+        d += timedelta(days=cadence)
+
+    # ── Bills ─────────────────────────────────────────────────────────────────
+    for bill in sched["bills"]:
+        actual_day = min(bill["day"], days_in_month)
+        events.append({
+            "date":     date(year, mon, actual_day).isoformat(),
+            "type":     "bill",
+            "name":     bill["name"],
+            "auto_pay": bill.get("auto_pay", False),
+        })
+
+    events.sort(key=lambda e: e["date"])
+
+    # ── Enrich amounts ────────────────────────────────────────────────────────
+    from src.storage.db import get_credit_card_statement_summary
+
+    # 1. Credit card statement balances (Plaid liabilities)
+    cc_by_name: dict[str, float] = {}
+    try:
+        for s in get_credit_card_statement_summary():
+            acct = (s.get("account_name") or "").lower()
+            bal  = s.get("last_statement_balance")
+            if acct and bal is not None:
+                cc_by_name[acct] = float(bal)
+    except Exception:
+        pass
+
+    # 2. Recent income transactions (payday amounts)
+    # 3. Recent utility/bill transaction amounts (tx_match lookup)
+    income_list: list[tuple[str, float]] = []
+    bill_tx_amounts: dict[str, float] = {}
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=30000;")
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("""
+                SELECT t.date, ABS(t.amount) AS amount
+                FROM transactions t
+                JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+                WHERE tc.user_category = 'Income' AND IFNULL(t.pending, 0) = 0
+                ORDER BY t.date DESC LIMIT 5
+            """).fetchall()
+            income_list = [(r["date"], float(r["amount"])) for r in rows]
+
+            for bill in sched["bills"]:
+                kw = (bill.get("tx_match") or "").lower().strip()
+                if not kw:
+                    continue
+                row = conn.execute("""
+                    SELECT ABS(amount) AS amount
+                    FROM transactions
+                    WHERE (LOWER(name) LIKE ? OR LOWER(merchant_name) LIKE ?)
+                      AND IFNULL(pending, 0) = 0
+                    ORDER BY date DESC LIMIT 1
+                """, (f"%{kw}%", f"%{kw}%")).fetchone()
+                if row:
+                    bill_tx_amounts[bill["name"]] = float(row["amount"])
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    # Payday estimate: 2nd-most-recent income transaction amount
+    payday_estimate = income_list[1][1] if len(income_list) >= 2 else (
+                      income_list[0][1] if income_list else None)
+
+    # Build a bill config lookup for quick access
+    bill_cfg_map = {b["name"]: b for b in sched["bills"]}
+
+    for ev in events:
+        cfg = bill_cfg_map.get(ev["name"], {})
+
+        # Static override wins everything
+        if cfg.get("amount_override"):
+            ev["amount"] = float(cfg["amount_override"])
+            ev["amount_type"] = "static"
+            continue
+
+        if ev["type"] == "payday":
+            ev_date = date.fromisoformat(ev["date"])
+            actual = next(
+                (amt for d, amt in income_list
+                 if abs((date.fromisoformat(d) - ev_date).days) <= 2),
+                None,
+            )
+            if actual is not None:
+                ev["amount"] = actual
+                ev["amount_type"] = "actual"
+            elif payday_estimate is not None:
+                ev["amount"] = payday_estimate
+                ev["amount_type"] = "estimate"
+
+        elif ev["type"] == "bill":
+            # a) Plaid statement balance
+            pm = (cfg.get("plaid_match") or "").lower().strip()
+            if pm:
+                for acct_name, bal in cc_by_name.items():
+                    if pm in acct_name:
+                        ev["amount"] = bal
+                        ev["amount_type"] = "statement"
+                        break
+            # b) Recent matching transaction
+            if "amount" not in ev and ev["name"] in bill_tx_amounts:
+                ev["amount"] = bill_tx_amounts[ev["name"]]
+                ev["amount_type"] = "estimate"
+
+    return jsonify(events)
+
+
 @reports_bp.route("/api/calendar_2week")
 @login_required
 def api_calendar_2week():
@@ -1034,7 +1191,7 @@ def api_budget():
         payload = request.get_json(silent=True) or {}
         month = payload.get("month")
         items = payload.get("items", [])
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = sqlite3.connect(str(DB_PATH), timeout=30)
         cur = conn.cursor()
         for it in items:
             cat = (it.get("category") or "").strip() or "Uncategorized"
@@ -1048,7 +1205,7 @@ def api_budget():
         conn.close()
         return jsonify({"status": "ok"})
     # GET
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
     cur = conn.cursor()
     if month:
         cur.execute("SELECT category, amount FROM budgets WHERE month = ? ORDER BY category;", (month,))
@@ -1094,7 +1251,7 @@ def api_budget_vs_actual():
     actuals = actuals[actuals.index.notnull()]
 
     # Budgets
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
     cur = conn.cursor()
     cur.execute("SELECT category, amount FROM budgets WHERE month = ?;", (month,))
     rows = cur.fetchall()
@@ -1191,7 +1348,7 @@ def api_daily_allowance():
     spend = df.loc[~df["is_income"], "amount"].sum()
 
     # Budget sum for month
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
     cur = conn.cursor()
     cur.execute("SELECT SUM(amount) FROM budgets WHERE month = ?", (month,))
     s = cur.fetchone()[0]
