@@ -5,700 +5,237 @@
     <title>Analysis Reports</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 2rem; background: #f8f9fa; }
-      h1 { color: #333; }
-      table { border-collapse: collapse; width: 100%; background: #fff; }
-      th, td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; text-align: left; }
-      th { background: #f1f3f4; }
+      h1 { color: #333; margin-bottom: .25rem; }
       a { color: #0078d7; text-decoration: none; }
       a:hover { text-decoration: underline; }
-      img { max-width: 400px; margin: 1rem; border-radius: 8px; box-shadow: 0 0 4px rgba(0,0,0,.1); }
-      .img-grid { display: flex; flex-wrap: wrap; }
-      .latest { background: #fff; padding:1rem; border-radius:8px; margin-bottom:2rem; box-shadow:0 0 4px rgba(0,0,0,.05); }
 
-      #controls { margin-top:1.5rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
-      #cards { display:flex; flex-wrap:wrap; gap:1rem; margin-top:1rem; }
+      #controls { margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem; }
+      #controls label { font-weight: 600; }
+      select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 6px; }
+      .small { font-size: .9rem; color: #666; }
+
+      #cards { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1.25rem; }
       .card {
-        background:#fff; padding:1rem 1.25rem; border-radius:8px;
-        box-shadow:0 0 4px rgba(0,0,0,.05);
-        flex:1 1 220px; min-width:220px;
+        background: #fff; padding: 1rem 1.25rem; border-radius: 8px;
+        box-shadow: 0 0 4px rgba(0,0,0,.07);
+        flex: 1 1 180px; min-width: 180px;
       }
-      .card h3 { margin:0 0 .25rem; font-size:1rem; color:#555; }
-      .card p { margin:0; font-size:1.2rem; font-weight:600; }
+      .card h3 { margin: 0 0 .25rem; font-size: .9rem; color: #666; text-transform: uppercase; letter-spacing: .04em; }
+      .card p { margin: 0; font-size: 1.4rem; font-weight: 700; }
+      .card p.positive { color: #0a7; }
+      .card p.negative { color: #c33; }
+
       #charts { margin-top: 2rem; }
-      .chart { margin-bottom: 3rem; }
+      .chart { margin-bottom: 2.5rem; background: #fff; border-radius: 8px; box-shadow: 0 0 4px rgba(0,0,0,.07); padding: .5rem; min-height: 400px; }
 
-      .day-tile{
-        background:#fff; border-radius:8px; padding:.75rem .9rem;
-        box-shadow:0 0 4px rgba(0,0,0,.05);
-        width: 180px; cursor:pointer;
-      }
-      .day-tile:hover{ outline:2px solid rgba(0,120,215,.25); }
-      .day-tile .d{ font-weight:700; }
-      .day-tile .s{ font-size:1.05rem; font-weight:700; margin-top:.25rem; }
-      .day-tile .c{ color:#666; font-size:.9rem; }
-
-      .cal-table{ border-collapse:collapse; width:100%; background:#fff; }
-      .cal-table th, .cal-table td{ border:1px solid #eee; padding:.5rem; vertical-align:top; min-width:120px; }
-      .cal-table th{ background:#f1f3f4; position:sticky; top:0; }
-      .cal-day{ font-weight:700; }
-      .cal-spend{ margin-top:.25rem; font-size:.95rem; font-weight:700; }
-      .cal-count{ color:#666; font-size:.85rem; }
-      .cal-cell{ cursor:pointer; }
-      .cal-cell:hover{ background:#f7fbff; }
-      .today-badge{ display:inline-block; padding:.1rem .35rem; border-radius:6px; background:#e8f2ff; color:#0b4f8a; font-size:.75rem; margin-left:.25rem; }
-
-      
-
-
-      /* Panels */
-      .panel { background:#fff; padding:1rem 1.25rem; border-radius:8px; box-shadow:0 0 4px rgba(0,0,0,.05); margin-top:2rem; }
-      .panel h2 { margin-top:0; font-size:1.25rem; }
-      .row { display:flex; gap:1rem; flex-wrap:wrap; }
-      .col { flex:1 1 320px; min-width:320px; }
-      .input-row { display:flex; gap:.5rem; flex-wrap:wrap; margin:.5rem 0; }
-      input[type="number"], input[type="text"] { padding:.4rem .5rem; border:1px solid #ccc; border-radius:6px; }
-      button { padding:.45rem .75rem; background:#0078d7; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+      /* Calendar */
+      .panel { background:#fff; padding:1rem 1.25rem; border-radius:8px; box-shadow:0 0 4px rgba(0,0,0,.07); margin-top:2rem; }
+      .panel h2 { margin-top:0; }
+      button { padding:.4rem .7rem; background:#0078d7; color:#fff; border:none; border-radius:6px; cursor:pointer; }
       button:hover { background:#005fa3; }
-      .small { font-size:.9rem; color:#666; }
-      .success { color:#0a7; }
-      .warn { color:#c60; }
+      .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-top:.5rem; }
+      .cal-hdr  { text-align:center; font-size:.8rem; font-weight:700; color:#666; padding:.35rem 0; background:#f1f3f4; border-radius:4px; }
+      .cal-cell { min-height:90px; border:1px solid #eee; border-radius:4px; padding:.3rem .4rem; font-size:.78rem; }
+      .cal-cell.today { background:#fffbe6; border-color:#ffe58f; }
+      .cal-cell.other-month { background:#fafafa; }
+      .cal-day-num { font-weight:700; margin-bottom:.25rem; color:#333; }
+      .badge { display:inline-block; border-radius:4px; padding:.08rem .35rem; font-size:.72rem; font-weight:600; margin:.1rem .1rem 0 0; white-space:nowrap; overflow:hidden; max-width:100%; text-overflow:ellipsis; }
+      .badge.pay       { background:#d4edda; color:#155724; }
+      .badge.xfer      { background:#cce5ff; color:#004085; }
+      .badge.bill-auto { background:#fff3cd; color:#856404; }
+      .badge.bill-man  { background:#f8d7da; color:#721c24; }
+      .cal-legend { margin-top:.75rem; display:flex; gap:1rem; flex-wrap:wrap; font-size:.85rem; }
     </style>
     <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   </head>
   <body>
     <h1>Analysis Reports</h1>
     <p><a href="/">← Back to Home</a></p>
-    <p>Showing most recent analytics results in <code>/results</code></p>
-
-    {% if files %}
-    <div class="latest">
-      <h2>Latest Summary</h2>
-      <p><strong>{{ files[0].name }}</strong> — {{ files[0].mtime }} ({{ files[0].size }} KB)</p>
-      <p><a href="/reports/file/{{ files[0].name }}">Download Latest File →</a></p>
-    </div>
-    {% endif %}
 
     <div id="controls">
       <label for="range">Time Range:</label>
       <select id="range">
         <option value="30d">Last 30 Days</option>
-        <option value="ytd">Year-to-Date</option>
+        <option value="ytd" selected>Year-to-Date</option>
         <option value="12m">Last 12 Months</option>
       </select>
       <span id="status" class="small"></span>
     </div>
 
     <div id="cards">
-      <div class="card"><h3>Total Spent</h3><p id="card-total">–</p></div>
-      <div class="card"><h3>Average Txn Size</h3><p id="card-avg">–</p></div>
-      <div class="card"><h3>MoM % Change</h3><p id="card-mom">–</p></div>
-      <div class="card"><h3>YTD % Change</h3><p id="card-ytd">–</p></div>
-      <div class="card"><h3>Daily Allowance</h3><p id="card-allow">–</p><div class="small" id="card-allow-mode"></div></div>
+      <div class="card"><h3>Income</h3><p id="card-income">–</p></div>
+      <div class="card"><h3>Expenses</h3><p id="card-expenses">–</p></div>
+      <div class="card"><h3>Net</h3><p id="card-net">–</p></div>
+      <div class="card"><h3>MoM Change</h3><p id="card-mom">–</p></div>
+      <div class="card"><h3>Avg Transaction</h3><p id="card-avg">–</p></div>
     </div>
 
-    <div class="panel">
-      <h2>Spending Calendar</h2>
-      <div class="input-row">
-        <button onclick="shiftTwoWeek(-14)">← Prev 2 weeks</button>
-        <button onclick="shiftTwoWeek(14)">Next 2 weeks →</button>
-        <span class="small" id="tw-label"></span>
+    <div class="panel" id="cal-panel">
+      <h2>Schedule Calendar</h2>
+      <div style="display:flex; gap:.75rem; align-items:center;">
+        <button onclick="shiftCal(-1)">&#8592; Prev</button>
+        <strong id="cal-month-label" style="min-width:160px; text-align:center;"></strong>
+        <button onclick="shiftCal(1)">Next &#8594;</button>
       </div>
-      <div id="two-week" style="display:flex; flex-wrap:wrap; gap:0.75rem; margin-top:0.75rem;"></div>
-      <div class="input-row" style="margin-top:1.25rem;">
-        <button onclick="shiftMonth(-1)">← Prev month</button>
-        <button onclick="shiftMonth(1)">Next month →</button>
-        <span class="small" id="month-label"></span>
+      <div id="cal-grid" class="cal-grid"></div>
+      <div class="cal-legend">
+        <span><span class="badge pay">Payday</span> Payday</span>
+        <span><span class="badge xfer">Xfer</span> Transfer (Mon after payday)</span>
+        <span><span class="badge bill-auto">Bill</span> Bill — auto pay</span>
+        <span><span class="badge bill-man">Bill</span> Bill — manual pay</span>
       </div>
-      <div id="month-cal" style="overflow:auto;"></div>
-      <div class="small" style="margin-top:1rem;">
-        <strong id="day-detail-title"></strong>
-        <div id="day-detail"></div>
-      </div>
-    </div>
-
-    {% if files %}
-      <h2>All Files</h2>
-      <table>
-        <tr><th>Filename</th><th>Modified</th><th>Type</th><th>Size (KB)</th></tr>
-        {% for f in files %}
-        <tr>
-          <td><a href="/reports/file/{{ f.name }}">{{ f.name }}</a></td>
-          <td>{{ f.mtime }}</td>
-          <td>{{ f.suffix }}</td>
-          <td style="text-align:right">{{ f.size }}</td>
-        </tr>
-        {% endfor %}
-      </table>
-    {% else %}
-      <p>No analysis results found yet.</p>
-    {% endif %}
-
-    {% if images %}
-      <h2>Latest Charts (Static PNGs)</h2>
-      <div class="img-grid">
-        {% for img in images %}
-        <div>
-          <img src="/reports/file/{{ img.name }}" alt="{{ img.name }}"><br>{{ img.name }}
-        </div>
-        {% endfor %}
-      </div>
-    {% endif %}
-
-    <div class="panel">
-      <h2>53 Checking — Pay Cycle (14 days)</h2>
-      <div class="input-row">
-        <button onclick="shiftPaycycle(-14)">← Prev</button>
-        <button onclick="shiftPaycycle(14)">Next →</button>
-        <span class="small" id="pc-label"></span>
-      </div>
-
-      <div class="row">
-        <div class="col"><h3>Income</h3><div id="pc-income"></div></div>
-        <div class="col"><h3>Fixed Expenses</h3><div id="pc-fixed"></div></div>
-        <div class="col"><h3>Variable Expenses</h3><div id="pc-variable"></div></div>
-      </div>
-
-      <div class="small" id="pc-totals" style="margin-top:.75rem;"></div>
     </div>
 
     <div id="charts">
-      <h2>Interactive Dashboard</h2>
-      <div id="chart-category" class="chart"></div>
       <div id="chart-monthly" class="chart"></div>
+      <div id="chart-category" class="chart"></div>
       <div id="chart-merchants" class="chart"></div>
-      <div id="chart-cashflow" class="chart"></div>
-    </div>
-
-    <!-- Budget / Forecast / Paycheck / Utilities -->
-    <div class="panel">
-      <h2>Budget and Forecast</h2>
-      <div class="row">
-        <div class="col">
-          <h3>Budget vs Actual</h3>
-          <div class="input-row">
-            <input id="budget-month" type="text" placeholder="YYYY-MM (optional)" />
-            <button onclick="loadBudget()">Load</button>
-            <button onclick="saveBudget()">Save</button>
-          </div>
-          <div id="budget-status" class="small"></div>
-          <div id="chart-budget" class="chart"></div>
-        </div>
-        <div class="col">
-          <h3>Cashflow Forecast</h3>
-          <div id="chart-forecast" class="chart"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Paycheck Estimator</h2>
-      <div class="input-row">
-        <input id="pe-gross" type="number" step="0.01" placeholder="Gross per paycheck" />
-        <input id="pe-periods" type="number" step="1" value="26" />
-        <input id="pe-fed" type="number" step="0.01" value="0.18" />
-        <input id="pe-state" type="number" step="0.01" value="0.05" />
-        <input id="pe-other" type="number" step="0.01" placeholder="Other deductions" value="0" />
-        <button onclick="calcPaycheck()">Estimate</button>
-      </div>
-      <div class="small">Fields: gross, pay periods per year, federal rate, state rate, other deductions.</div>
-      <div id="pe-out" class="small"></div>
-    </div>
-
-    <div class="panel">
-      <h2>Insights</h2>
-      <div id="insights" class="small">Loading insights…</div>
-    </div>
-
-    <div class="panel">
-      <h2>Password Generator</h2>
-      <div class="input-row">
-        <input id="pw-length" type="number" value="16" min="8" max="128" />
-        <label><input id="pw-special" type="checkbox" checked /> Include special</label>
-        <button onclick="genPassword()">Generate</button>
-      </div>
-      <div id="pw-out" class="small"></div>
     </div>
 
     <p><a href="/">← Back to Home</a></p>
 
     <script>
-    const REFRESH_MS = 60000;
-    let timer;
+    const REFRESH_MS = 120000;
+    let refreshTimer;
 
-    async function fetchJSON(url, opts) {
-      const r = await fetch(url, opts);
-      return await r.json();
+    async function fetchJSON(url) {
+      const r = await fetch(url);
+      return r.json();
     }
 
-    async function loadSummaryCards(range) {
-      const kpi = await fetchJSON('/reports/api/kpi_summary?range=' + range);
-      if (!kpi || kpi.error) return;
-      document.getElementById('card-total').textContent = '$' + kpi.total_spent.toFixed(2);
-      document.getElementById('card-avg').textContent = '$' + kpi.avg_txn.toFixed(2);
-      document.getElementById('card-mom').textContent = kpi.mom_pct.toFixed(1) + '%';
-      document.getElementById('card-ytd').textContent = kpi.ytd_pct.toFixed(1) + '%';
+    function fmt(n) { return '$' + Number(n || 0).toFixed(2); }
 
-      const da = await fetchJSON('/reports/api/daily_allowance');
-      if (!da.error) {
-        document.getElementById('card-allow').textContent = '$' + da.daily_allowance.toFixed(2);
-        const modeEl = document.getElementById('card-allow-mode');
-        modeEl.textContent = da.mode === 'accumulation'
-          ? 'Accumulation day'
-          : 'Depletion day';
-        modeEl.className = da.mode === 'accumulation' ? 'small success' : 'small warn';
-      }
-    }
-
-    async function loadCharts() {
+    async function loadAll() {
       const range = document.getElementById('range').value;
-      document.getElementById('status').textContent = 'Updating charts (' + range + ') ...';
+      document.getElementById('status').textContent = 'Loading…';
+
       try {
-        const [catData, trend, merchants, cashflow] = await Promise.all([
+        const [split, kpi, catData, trend, merchants] = await Promise.all([
+          fetchJSON('/reports/api/income_expense_split?range=' + range),
+          fetchJSON('/reports/api/kpi_summary?range=' + range),
           fetchJSON('/reports/api/spending_by_category?range=' + range),
-          fetchJSON('/reports/api/monthly_trend?range=' + range),
+          fetchJSON('/reports/api/cashflow_summary?range=' + range),
           fetchJSON('/reports/api/top_merchants?range=' + range),
-          fetchJSON('/reports/api/cashflow_summary?range=' + range)
         ]);
 
-        if (!catData.error && Object.keys(catData).length) {
-          Plotly.newPlot('chart-category', [{
-            x:Object.keys(catData),
-            y:Object.values(catData),
-            type:'bar'
-          }], {title:'Spending by Category', margin:{t:40}});
+        // --- KPI cards ---
+        if (!split.error) {
+          document.getElementById('card-income').textContent   = fmt(split.income);
+          document.getElementById('card-expenses').textContent = fmt(split.expenses);
+          const net = split.net_balance;
+          const netEl = document.getElementById('card-net');
+          netEl.textContent = fmt(net);
+          netEl.className = net >= 0 ? 'positive' : 'negative';
+        }
+        if (!kpi.error) {
+          const momEl = document.getElementById('card-mom');
+          const mom = kpi.mom_pct;
+          momEl.textContent = (mom >= 0 ? '+' : '') + mom.toFixed(1) + '%';
+          momEl.className = mom <= 0 ? 'positive' : 'negative';
+          document.getElementById('card-avg').textContent = fmt(kpi.avg_txn);
         }
 
+        // --- Monthly income vs expenses ---
         if (Array.isArray(trend) && trend.length) {
-          Plotly.newPlot('chart-monthly', [{
-            x:trend.map(r=>r.month),
-            y:trend.map(r=>r.total),
-            type:'scatter', mode:'lines+markers'
-          }], {title:'Monthly Spending Trend', margin:{t:40}});
+          Plotly.newPlot('chart-monthly', [
+            { x: trend.map(r => r.month), y: trend.map(r => r.inflow),  name: 'Income',   type: 'bar', marker: { color: '#2ca02c' } },
+            { x: trend.map(r => r.month), y: trend.map(r => r.outflow), name: 'Expenses', type: 'bar', marker: { color: '#d62728' } },
+          ], { title: 'Monthly Income vs Expenses', barmode: 'group', margin: { t: 50 }, height: 400 }, { responsive: true });
         }
 
+        // --- Spending by category ---
+        if (!catData.error && Object.keys(catData).length) {
+          const cats = Object.entries(catData).sort((a, b) => b[1] - a[1]);
+          Plotly.newPlot('chart-category', [{
+            x: cats.map(c => c[0]),
+            y: cats.map(c => c[1]),
+            type: 'bar',
+            marker: { color: '#1f77b4' },
+          }], { title: 'Spending by Category', margin: { t: 50 }, height: 400 }, { responsive: true });
+        }
+
+        // --- Top merchants ---
         if (Array.isArray(merchants) && merchants.length) {
+          const top = merchants.slice(0, 20);
           Plotly.newPlot('chart-merchants', [{
-            x:merchants.map(r=>r.amount),
-            y:merchants.map(r=>r.merchant),
-            type:'bar', orientation:'h'
-          }], {title:'Top Merchants', margin:{t:40}});
+            x: top.map(r => r.amount),
+            y: top.map(r => r.merchant),
+            type: 'bar',
+            orientation: 'h',
+            marker: { color: '#ff7f0e' },
+          }], {
+            title: 'Top Merchants',
+            margin: { t: 50, l: 180 },
+            height: 550,
+            xaxis: { title: 'Total Spend ($)' },
+          }, { responsive: true });
         }
 
-        if (Array.isArray(cashflow) && cashflow.length) {
-          Plotly.newPlot('chart-cashflow', [
-            {x:cashflow.map(r=>r.month), y:cashflow.map(r=>r.inflow), name:'Inflow', type:'bar'},
-            {x:cashflow.map(r=>r.month), y:cashflow.map(r=>r.outflow), name:'Outflow', type:'bar'},
-            {x:cashflow.map(r=>r.month), y:cashflow.map(r=>r.running_balance), name:'Running Balance', type:'scatter', mode:'lines+markers', yaxis:'y2'}
-          ], {
-            title:'Cash Flow Summary',
-            barmode:'group',
-            margin:{t:40},
-            yaxis:{title:'Flow'},
-            yaxis2:{overlaying:'y', side:'right', title:'Balance'}
-          });
-        }
-
-        await loadSummaryCards(range);
-        await loadInsights();
-
-        document.getElementById('status').textContent = 'Last updated ' + new Date().toLocaleTimeString();
+        document.getElementById('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
       } catch (err) {
         console.error(err);
         document.getElementById('status').textContent = 'Error loading data';
       }
     }
 
-    // Budget UI
-    async function loadBudget() {
-      const month = (document.getElementById('budget-month').value || '').trim();
-      const qs = month ? ('?month=' + encodeURIComponent(month)) : '';
-      const budget = await fetchJSON('/reports/api/budget' + qs);
-      const bva = await fetchJSON('/reports/api/budget_vs_actual' + (month ? ('?month=' + encodeURIComponent(month)) : ''));
-      document.getElementById('budget-status').textContent = 'Loaded ' + (month || 'default') + ' budget';
-      if (Array.isArray(bva) && bva.length) {
-        Plotly.newPlot('chart-budget', [
-          {x:bva.map(r=>r.category), y:bva.map(r=>r.budget), name:'Budget', type:'bar'},
-          {x:bva.map(r=>r.category), y:bva.map(r=>r.actual), name:'Actual', type:'bar'}
-        ], {title:'Budget vs Actual', barmode:'group', margin:{t:40}});
-      } else {
-        Plotly.purge('chart-budget');
-      }
+    // ── Calendar ─────────────────────────────────────────────────────────────
+    let calYear, calMonth;
+
+    function shiftCal(delta) {
+      calMonth += delta;
+      if (calMonth > 12) { calMonth = 1; calYear++; }
+      if (calMonth < 1)  { calMonth = 12; calYear--; }
+      loadCal();
     }
 
-    async function saveBudget() {
-      const month = (document.getElementById('budget-month').value || '').trim();
-      const sample = [
-        // Example default; adjust in UI later
-        {category: 'Groceries', amount: 600},
-        {category: 'Dining', amount: 400},
-        {category: 'Utilities', amount: 300},
-        {category: 'Shopping', amount: 300},
-        {category: 'Travel', amount: 200}
-      ];
-      const payload = { month: month || null, items: sample };
-      const res = await fetchJSON('/reports/api/budget', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      document.getElementById('budget-status').textContent =
-        res.status === 'ok' ? 'Budget saved.' : 'Save failed.';
-      await loadBudget();
-    }
+    async function loadCal() {
+      const monthStr = `${calYear}-${String(calMonth).padStart(2, '0')}`;
+      document.getElementById('cal-month-label').textContent =
+        new Date(calYear, calMonth - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
 
-    let paycycleStart = null; // YYYY-MM-DD
+      const events = await fetchJSON('/reports/api/calendar_events?month=' + monthStr);
+      const byDate = {};
+      (events || []).forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
 
-    function shiftPaycycle(deltaDays){
-      if (!paycycleStart){
-        paycycleStart = new Date(); // fallback
-      } else {
-        const d = new Date(paycycleStart + "T00:00:00");
-        d.setDate(d.getDate() + deltaDays);
-        paycycleStart = d.toISOString().slice(0,10);
-      }
-      loadPaycycle();
-    }
+      const firstDow   = new Date(calYear, calMonth - 1, 1).getDay();
+      const daysInMonth = new Date(calYear, calMonth, 0).getDate();
+      const todayStr   = new Date().toISOString().slice(0, 10);
+      const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-    function renderTxTable(rows){
-      if (!rows || !rows.length) return `<div class="small">None</div>`;
-      let html = `<table style="width:100%; border-collapse:collapse;">
-        <tr>
-          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Date</th>
-          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Transaction</th>
-          <th style="text-align:right; border-bottom:1px solid #ddd; padding:.35rem;">Amount</th>
-        </tr>`;
-      rows.forEach(r => {
-        const label = (r.merchant && r.merchant.trim()) ? r.merchant : r.name;
-        html += `<tr>
-          <td style="padding:.3rem; border-bottom:1px solid #eee;">${r.date}</td>
-          <td style="padding:.3rem; border-bottom:1px solid #eee;">${(label||'').toString()}</td>
-          <td style="padding:.3rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
-        </tr>`;
-      });
-      html += `</table>`;
-      return html;
-    }
+      let html = dow.map(d => `<div class="cal-hdr">${d}</div>`).join('');
+      for (let i = 0; i < firstDow; i++) html += `<div class="cal-cell other-month"></div>`;
 
-    async function loadPaycycle(){
-      const qs = paycycleStart ? (`?start=${encodeURIComponent(paycycleStart)}&days=14`) : (`?days=14`);
-      const res = await fetchJSON('/reports/api/paycycle_53' + qs);
-
-      // server tells us the actual window
-      paycycleStart = res.start;
-      document.getElementById('pc-label').textContent = `${res.start} → ${res.end}`;
-
-      document.getElementById('pc-income').innerHTML = renderTxTable(res.income);
-      document.getElementById('pc-fixed').innerHTML = renderTxTable(res.fixed);
-      document.getElementById('pc-variable').innerHTML = renderTxTable(res.variable);
-
-      const t = res.totals || {};
-      document.getElementById('pc-totals').innerHTML =
-        `<strong>Totals</strong> — Income: $${Number(t.income||0).toFixed(2)} | ` +
-        `Fixed: $${Number(t.fixed||0).toFixed(2)} | ` +
-        `Variable: $${Number(t.variable||0).toFixed(2)} | ` +
-        `Net: $${Number(t.net||0).toFixed(2)}`;
-    }
-
-    let paycycleStart = null; // YYYY-MM-DD
-
-    function shiftPaycycle(deltaDays){
-      const d = paycycleStart ? new Date(paycycleStart + "T00:00:00") : new Date();
-      d.setDate(d.getDate() + deltaDays);
-      paycycleStart = d.toISOString().slice(0,10);
-      loadPaycycle();
-    }
-
-    function renderTxTable(rows){
-      if (!rows || !rows.length) return `<div class="small">None</div>`;
-      let html = `<table style="width:100%; border-collapse:collapse;">
-        <tr>
-          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Date</th>
-          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Transaction</th>
-          <th style="text-align:right; border-bottom:1px solid #ddd; padding:.35rem;">Amount</th>
-        </tr>`;
-      rows.forEach(r => {
-        html += `<tr>
-          <td style="padding:.3rem; border-bottom:1px solid #eee;">${r.date}</td>
-          <td style="padding:.3rem; border-bottom:1px solid #eee;">${(r.transaction||'').toString()}</td>
-          <td style="padding:.3rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
-        </tr>`;
-      });
-      html += `</table>`;
-      return html;
-    }
-
-    async function loadPaycycle(){
-      const qs = paycycleStart ? (`?start=${encodeURIComponent(paycycleStart)}&days=14`) : (`?days=14`);
-      const res = await fetchJSON('/reports/api/paycycle_53' + qs);
-
-      if (res.error){
-        document.getElementById('pc-label').textContent = res.error;
-        document.getElementById('pc-income').innerHTML = '';
-        document.getElementById('pc-fixed').innerHTML = '';
-        document.getElementById('pc-variable').innerHTML = '';
-        document.getElementById('pc-totals').textContent = '';
-        return;
-      }
-
-      paycycleStart = res.start;
-      document.getElementById('pc-label').textContent = `${res.start} → ${res.end}`;
-
-      document.getElementById('pc-income').innerHTML = renderTxTable(res.income);
-      document.getElementById('pc-fixed').innerHTML = renderTxTable(res.fixed);
-      document.getElementById('pc-variable').innerHTML = renderTxTable(res.variable);
-
-      const t = res.totals || {};
-      document.getElementById('pc-totals').innerHTML =
-        `<strong>Totals</strong> — Income: $${Number(t.income||0).toFixed(2)} | ` +
-        `Fixed: $${Number(t.fixed||0).toFixed(2)} | ` +
-        `Variable: $${Number(t.variable||0).toFixed(2)} | ` +
-        `Net: $${Number(t.net||0).toFixed(2)}`;
-    }
-
-
-    // Forecast chart
-    async function loadForecast() {
-      const fc = await fetchJSON('/reports/api/forecast_cashflow');
-      if (Array.isArray(fc) && fc.length) {
-        Plotly.newPlot('chart-forecast', [
-          {x:fc.map(r=>r.month), y:fc.map(r=>r.inflow), name:'Inflow', type:'bar'},
-          {x:fc.map(r=>r.month), y:fc.map(r=>r.outflow), name:'Outflow', type:'bar'},
-          {x:fc.map(r=>r.month), y:fc.map(r=>r.net), name:'Net', type:'scatter', mode:'lines+markers'}
-        ], {title:'6-Month Forecast (MA)', barmode:'group', margin:{t:40}});
-      } else {
-        Plotly.purge('chart-forecast');
-      }
-    }
-
-    // Paycheck estimator
-    async function calcPaycheck() {
-      const payload = {
-        gross: parseFloat(document.getElementById('pe-gross').value || '0'),
-        pay_periods: parseInt(document.getElementById('pe-periods').value || '26'),
-        federal_rate: parseFloat(document.getElementById('pe-fed').value || '0.18'),
-        state_rate: parseFloat(document.getElementById('pe-state').value || '0.05'),
-        other_deductions: parseFloat(document.getElementById('pe-other').value || '0')
-      };
-      const res = await fetchJSON('/reports/api/paycheck_estimate', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      });
-      document.getElementById('pe-out').textContent =
-        'Net per paycheck: $' + res.net_paycheck.toFixed(2) +
-        ' | Annual net: $' + res.annual_net.toFixed(2) +
-        ' | Annual gross: $' + res.annual_gross.toFixed(2) +
-        ' | Effective rate: ' + (res.effective_rate * 100).toFixed(1) + '%';
-    }
-
-    // Insights
-    async function loadInsights() {
-      const res = await fetchJSON('/reports/api/insights/summary');
-      const el = document.getElementById('insights');
-      if (Array.isArray(res) && res.length) {
-        el.innerHTML = res.map(r => (
-          '<div>' + r.message +
-          (r.meta ? ' ' + JSON.stringify(r.meta) : '') +
-          '</div>'
-        )).join('');
-      } else {
-        el.textContent = 'No notable insights right now.';
-      }
-    }
-
-    // Password generator
-    async function genPassword() {
-      const len = document.getElementById('pw-length').value || '16';
-      const special = document.getElementById('pw-special').checked ? 'true' : 'false';
-      const res = await fetchJSON('/reports/api/password_generate?length=' + len + '&special=' + special);
-      document.getElementById('pw-out').textContent = res.password || 'Failed to generate password.';
-    }
-
-    // Orchestration
-    function scheduleAutoRefresh() {
-      if (timer) clearInterval(timer);
-      timer = setInterval(loadCharts, REFRESH_MS);
-    }
-
-    let twoWeekAnchor = new Date(); // local
-    let calMonth = new Date(twoWeekAnchor.getFullYear(), twoWeekAnchor.getMonth(), 1);
-
-    function fmtYMD(d){
-      const y = d.getFullYear();
-      const m = String(d.getMonth()+1).padStart(2,'0');
-      const day = String(d.getDate()).padStart(2,'0');
-      return `${y}-${m}-${day}`;
-    }
-
-    function shiftTwoWeek(deltaDays){
-      twoWeekAnchor = new Date(twoWeekAnchor.getTime() + deltaDays*24*3600*1000);
-      loadTwoWeek();
-    }
-
-    function shiftMonth(delta){
-      calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth()+delta, 1);
-      loadMonth();
-    }
-
-    async function loadTwoWeek(){
-      const anchor = fmtYMD(twoWeekAnchor);
-      const data = await fetchJSON(`/reports/api/calendar_2week?anchor=${encodeURIComponent(anchor)}&days=14`);
-      const label = document.getElementById('tw-label');
-      if (Array.isArray(data) && data.length){
-        label.textContent = `${data[0].date} → ${data[data.length-1].date}`;
-      } else {
-        label.textContent = '';
-      }
-
-      const host = document.getElementById('two-week');
-      host.innerHTML = '';
-
-      (data || []).forEach(d => {
-        const div = document.createElement('div');
-        div.className = 'day-tile';
-        div.onclick = () => loadDayDetail(d.date);
-        div.innerHTML = `
-          <div class="d">${d.dow} ${d.date}</div>
-          <div class="s">$${Number(d.spend_total || 0).toFixed(2)}</div>
-          <div class="c">${d.txn_count || 0} txns</div>
-        `;
-        host.appendChild(div);
-      });
-    }
-
-    async function loadMonth(){
-      const monthKey = `${calMonth.getFullYear()}-${String(calMonth.getMonth()+1).padStart(2,'0')}`;
-      document.getElementById('month-label').textContent = monthKey;
-
-      const res = await fetchJSON(`/reports/api/calendar_month?month=${encodeURIComponent(monthKey)}`);
-      const weeks = res.weeks || [];
-
-      const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-      let html = `<table class="cal-table"><tr>${dow.map(x=>`<th>${x}</th>`).join('')}</tr>`;
-
-      const todayYMD = fmtYMD(new Date());
-
-      weeks.forEach(week => {
-        html += '<tr>';
-        week.forEach(cell => {
-          if (!cell){
-            html += `<td></td>`;
-          } else {
-            const isToday = cell.date === todayYMD;
-            html += `
-              <td class="cal-cell" onclick="loadDayDetail('${cell.date}')">
-                <div class="cal-day">
-                  ${cell.day}
-                  ${isToday ? `<span class="today-badge">today</span>` : ``}
-                </div>
-                <div class="cal-spend">$${Number(cell.spend_total || 0).toFixed(2)}</div>
-                <div class="cal-count">${cell.txn_count || 0} txns</div>
-              </td>
-            `;
-          }
+      for (let day = 1; day <= daysInMonth; day++) {
+        const ds = `${calYear}-${String(calMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        html += `<div class="cal-cell${ds === todayStr ? ' today' : ''}"><div class="cal-day-num">${day}</div>`;
+        (byDate[ds] || []).forEach(e => {
+          const fmtAmt = a => '$' + Number(a).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+          const est = e.amount_type === 'estimate' || e.amount_type === 'static';
+          const amtStr = e.amount != null ? ' ' + fmtAmt(e.amount) + (est ? '*' : '') : '';
+          const typeHint = {actual:'Actual', statement:'Statement bal.', estimate:'Estimated', static:'Manual'}[e.amount_type] || '';
+          if (e.type === 'payday')
+            html += `<span class="badge pay" title="${typeHint}">Payday${amtStr}</span>`;
+          else if (e.type === 'transfer')
+            html += `<span class="badge xfer">${e.name}</span>`;
+          else if (e.type === 'bill')
+            html += `<span class="badge ${e.auto_pay ? 'bill-auto' : 'bill-man'}" title="${e.name} — ${typeHint}">${e.name}${amtStr}</span>`;
         });
-        html += '</tr>';
-      });
-
-      html += '</table>';
-      document.getElementById('month-cal').innerHTML = html;
-    }
-
-    async function loadDayDetail(ymd){
-      document.getElementById('day-detail-title').textContent = `Spend detail for ${ymd}`;
-      const rows = await fetchJSON(`/reports/api/day_spend_detail?date=${encodeURIComponent(ymd)}`);
-
-      if (!Array.isArray(rows) || !rows.length){
-        document.getElementById('day-detail').innerHTML = `<div class="small">No spend transactions.</div>`;
-        return;
+        html += `</div>`;
       }
 
-      const top = rows.slice(0, 25);
-      let html = `<table style="width:100%; border-collapse:collapse; margin-top:.5rem;">
-        <tr>
-          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.4rem;">Merchant</th>
-          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.4rem;">Name</th>
-          <th style="text-align:right; border-bottom:1px solid #ddd; padding:.4rem;">Amount</th>
-          <th style="text-align:left; border-bottom:1px solid #ddd; padding:.4rem;">Category</th>
-        </tr>`;
-
-      top.forEach(r => {
-        html += `<tr>
-          <td style="padding:.35rem; border-bottom:1px solid #eee;">${(r.merchant_name || '').toString()}</td>
-          <td style="padding:.35rem; border-bottom:1px solid #eee;">${(r.name || '').toString()}</td>
-          <td style="padding:.35rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
-          <td style="padding:.35rem; border-bottom:1px solid #eee;">${(r.category || '').toString()}</td>
-        </tr>`;
-      });
-
-      html += `</table>`;
-      document.getElementById('day-detail').innerHTML = html;
+      const trailing = (7 - (firstDow + daysInMonth) % 7) % 7;
+      for (let i = 0; i < trailing; i++) html += `<div class="cal-cell other-month"></div>`;
+      document.getElementById('cal-grid').innerHTML = html;
     }
 
-    let paycycleStart = null; // YYYY-MM-DD
-
-function shiftPaycycle(deltaDays){
-  const d = paycycleStart ? new Date(paycycleStart + "T00:00:00") : new Date();
-  d.setDate(d.getDate() + deltaDays);
-  paycycleStart = d.toISOString().slice(0,10);
-  loadPaycycle();
-}
-
-function renderTxTable(rows){
-  if (!rows || !rows.length) return `<div class="small">None</div>`;
-  let html = `<table style="width:100%; border-collapse:collapse;">
-    <tr>
-      <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Date</th>
-      <th style="text-align:left; border-bottom:1px solid #ddd; padding:.35rem;">Transaction</th>
-      <th style="text-align:right; border-bottom:1px solid #ddd; padding:.35rem;">Amount</th>
-    </tr>`;
-  rows.forEach(r => {
-    html += `<tr>
-      <td style="padding:.3rem; border-bottom:1px solid #eee;">${r.date}</td>
-      <td style="padding:.3rem; border-bottom:1px solid #eee;">${(r.transaction||'').toString()}</td>
-      <td style="padding:.3rem; border-bottom:1px solid #eee; text-align:right;">$${Number(r.amount||0).toFixed(2)}</td>
-    </tr>`;
-  });
-  html += `</table>`;
-  return html;
-}
-
-async function loadPaycycle(){
-  const qs = paycycleStart ? (`?start=${encodeURIComponent(paycycleStart)}&days=14`) : (`?days=14`);
-  const res = await fetchJSON('/reports/api/paycycle_53' + qs);
-
-  if (res.error){
-    document.getElementById('pc-label').textContent = res.error;
-    document.getElementById('pc-income').innerHTML = '';
-    document.getElementById('pc-fixed').innerHTML = '';
-    document.getElementById('pc-variable').innerHTML = '';
-    document.getElementById('pc-totals').textContent = '';
-    return;
-  }
-
-  paycycleStart = res.start;
-  document.getElementById('pc-label').textContent = `${res.start} → ${res.end}`;
-
-  document.getElementById('pc-income').innerHTML = renderTxTable(res.income);
-  document.getElementById('pc-fixed').innerHTML = renderTxTable(res.fixed);
-  document.getElementById('pc-variable').innerHTML = renderTxTable(res.variable);
-
-  const t = res.totals || {};
-  document.getElementById('pc-totals').innerHTML =
-    `<strong>Totals</strong> — Income: $${Number(t.income||0).toFixed(2)} | ` +
-    `Fixed: $${Number(t.fixed||0).toFixed(2)} | ` +
-    `Variable: $${Number(t.variable||0).toFixed(2)} | ` +
-    `Net: $${Number(t.net||0).toFixed(2)}`;
-}
-
-
-    document.addEventListener('DOMContentLoaded', async () => {
-      await loadTwoWeek();
-      await loadMonth();
-      await loadCharts();
-      await loadBudget();
-      await loadForecast();
-      await loadPaycycle();
-      scheduleAutoRefresh();
-      document.getElementById('range').addEventListener('change', loadCharts);
+    document.addEventListener('DOMContentLoaded', () => {
+      const now = new Date();
+      calYear  = now.getFullYear();
+      calMonth = now.getMonth() + 1;
+      loadCal();
+      loadAll();
+      document.getElementById('range').addEventListener('change', loadAll);
+      refreshTimer = setInterval(loadAll, REFRESH_MS);
 
       // Session heartbeat
       setInterval(async () => {

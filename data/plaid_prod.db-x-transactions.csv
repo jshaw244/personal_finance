@@ -1,0 +1,28 @@
+Years (date),2026,,
+,,,
+Sum of amount,,,
+InOut,Account Name,Months (date),Total
+In,American Express Gold Card,Jan,-1824.59
+,,Feb,-5503.03
+,MASTERCARD ACCOUNT,Jan,-707.86
+,,Feb,-372.58
+,My Best Buy® Visa® Card,Jan,-140
+,,Feb,-2426.17
+,Prime Store Card,Jan,-2.99
+,,Feb,-2.99
+,Prime Visa,Jan,-1397.1
+,,Feb,-591.92
+,VentureOne,Jan,-167.68
+,,Feb,-107.66
+Out,American Express Gold Card,Jan,1191.38
+,,Feb,5432.28
+,MASTERCARD ACCOUNT,Jan,496.85
+,,Feb,352.58
+,My Best Buy® Visa® Card,Jan,0
+,,Feb,32.98
+,Prime Store Card,Jan,2.99
+,,Feb,2.99
+,Prime Visa,Jan,293.7
+,,Feb,805.99
+,VentureOne,Jan,107.66
+Grand Total,,,-4525.17

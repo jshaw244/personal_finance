@@ -1,0 +1,93 @@
+{
+  "payday": {
+    "cadence_days": 14,
+    "anchor_date": "2026-03-06"
+  },
+  "bills": [
+    {
+      "name": "53 Credit Card",
+      "day": 5,
+      "auto_pay": true,
+      "plaid_match": "fifth third"
+    },
+    {
+      "name": "Village of Addison",
+      "day": 12,
+      "auto_pay": true,
+      "tx_match": "addison"
+    },
+    {
+      "name": "Amex CC",
+      "day": 13,
+      "auto_pay": true,
+      "plaid_match": "american express"
+    },
+    {
+      "name": "Amazon CC",
+      "day": 20,
+      "auto_pay": true,
+      "plaid_match": "amazon store"
+    },
+    {
+      "name": "Chase Amazon CC",
+      "day": 20,
+      "auto_pay": true,
+      "plaid_match": "chase amazon"
+    },
+    {
+      "name": "Electric",
+      "day": 20,
+      "auto_pay": true,
+      "tx_match": "comed"
+    },
+    {
+      "name": "Cap One CC",
+      "day": 21,
+      "auto_pay": true,
+      "plaid_match": "capital one"
+    },
+    {
+      "name": "Mortgage Transfer",
+      "day": 23,
+      "auto_pay": true,
+      "tx_match": "mortgage"
+    },
+    {
+      "name": "House Holdings",
+      "day": 27,
+      "auto_pay": true
+    },
+    {
+      "name": "Best Buy CC",
+      "day": 28,
+      "auto_pay": false,
+      "plaid_match": "best buy"
+    },
+    {
+      "name": "Gas",
+      "day": 28,
+      "auto_pay": true,
+      "tx_match": "nicor"
+    },
+    {
+      "name": "Cable/Internet",
+      "day": 31,
+      "auto_pay": true,
+      "tx_match": "comcast"
+    },
+    {
+      "name": "Cell Phone",
+      "day": 31,
+      "auto_pay": true,
+      "tx_match": ""
+    }
+  ],
+  "transfers": [
+    { "name": "53 Savings" },
+    { "name": "AA Credit Union" },
+    { "name": "Capital One Savings" },
+    { "name": "Schwab Checking" },
+    { "name": "Synchrony IRA" },
+    { "name": "Tax Savings (HYS)" }
+  ]
+}

@@ -7,9 +7,24 @@ from src.common.paths import DB_FILE as DB_PATH, SCHEMA_FILE
 
 
 def get_connection() -> sqlite3.Connection:
-    """Return a sqlite3 connection to the active DB with FK + Row dicts."""
-    conn = sqlite3.connect(DB_PATH)
+    """Return a sqlite3 connection to the active DB with FK enforcement, WAL mode, and 30s busy timeout."""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.execute("PRAGMA foreign_keys = ON;")
+    return conn
+
+
+def _db_connect() -> sqlite3.Connection:
+    """
+    Lightweight connection for use in `with _db_connect() as conn:` blocks.
+    Sets WAL mode, 30s busy timeout, and FK enforcement on every connection.
+    Does NOT set row_factory so tuple results are unchanged for existing callers.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
@@ -24,7 +39,7 @@ def _execute_schema_sql(conn: sqlite3.Connection) -> None:
 # Core DB Setup
 # -----------------------------
 def init_db() -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         _execute_schema_sql(conn)
         conn.commit()
@@ -40,7 +55,7 @@ def insert_plaid_raw(
     payload: dict,
 ) -> None:
     """Store redacted Plaid response payload JSON in plaid_raw."""
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(
             """
@@ -60,7 +75,7 @@ def save_item(
     institution_id: str | None = None,
     institution_name: str | None = None,
 ) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(
             """
@@ -78,7 +93,7 @@ def save_item(
 
 
 def get_all_items() -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.execute(
             """
@@ -100,7 +115,7 @@ def get_all_items() -> list[dict[str, Any]]:
 
 
 def count_items_by_institution(institution_id: str) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.execute(
             "SELECT COUNT(*) FROM items WHERE institution_id = ?",
@@ -125,7 +140,7 @@ def save_accounts(item_id: str, accounts: list[dict]) -> None:
 
     now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.cursor()
 
@@ -215,7 +230,7 @@ def save_transactions(item_id: str, transactions: list[dict]) -> None:
 
     now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.cursor()
 
@@ -292,7 +307,7 @@ def save_transactions(item_id: str, transactions: list[dict]) -> None:
         conn.commit()
 
 def get_transaction_cursor(item_id: str) -> str | None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.execute(
             "SELECT cursor FROM transaction_cursors WHERE item_id = ?",
@@ -303,7 +318,7 @@ def get_transaction_cursor(item_id: str) -> str | None:
 
 
 def set_transaction_cursor(item_id: str, cursor: str) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(
             """
@@ -326,7 +341,7 @@ def apply_removed_transactions(item_id: str, removed: list[dict]) -> None:
     if not removed:
         return
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.cursor()
 
@@ -361,7 +376,7 @@ def count_transactions_canonical(
     item_id: str | None = None,
     account_id: str | None = None,
 ) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
 
         where = ["t.date >= date('now', ?)"]
@@ -387,7 +402,7 @@ def count_transactions_canonical(
 # -----------------------------
 
 def upsert_liabilities_raw(item_id: str, payload: dict) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(
             """
@@ -402,7 +417,7 @@ def upsert_liabilities_raw(item_id: str, payload: dict) -> None:
         conn.commit()
 
 def upsert_recurring_raw(item_id: str, payload: dict) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(
             """
@@ -439,7 +454,7 @@ def normalize_merchant(s: str | None) -> str:
     return s
 
 def get_transaction_basic(transaction_id: str) -> dict | None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -459,7 +474,7 @@ def get_transaction_basic(transaction_id: str) -> dict | None:
 
 
 def get_top_merchants(days: int = 30, limit: int = 50) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
@@ -483,7 +498,7 @@ def get_top_merchants(days: int = 30, limit: int = 50) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
 
 def get_credit_card_statement_summary(item_id: str | None = None) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
 
@@ -530,7 +545,7 @@ def get_credit_card_statement_summary(item_id: str | None = None) -> list[dict[s
 
 
 def get_recurring_raw(item_id: str | None = None) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
 
@@ -563,7 +578,7 @@ def upsert_transaction_classification(
     user_subcategory: str | None = None,
     merchant_normalized: str | None = None,
 ) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(
             """
@@ -597,8 +612,48 @@ def upsert_transaction_classification(
         conn.commit()
 
 
+def upsert_transaction_classifications_batch(rows: list[dict]) -> int:
+    """
+    Write all classification rows in a single transaction.
+    Each dict must have: transaction_id, exclude_from_spend, exclude_reason,
+                         user_category, user_subcategory, merchant_normalized
+    Returns the number of rows written.
+    """
+    if not rows:
+        return 0
+    sql = """
+        INSERT INTO transaction_classifications (
+          transaction_id, exclude_from_spend, exclude_reason,
+          user_category, user_subcategory, merchant_normalized, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(transaction_id) DO UPDATE SET
+          exclude_from_spend=excluded.exclude_from_spend,
+          exclude_reason=excluded.exclude_reason,
+          user_category=COALESCE(excluded.user_category, transaction_classifications.user_category),
+          user_subcategory=COALESCE(excluded.user_subcategory, transaction_classifications.user_subcategory),
+          merchant_normalized=COALESCE(excluded.merchant_normalized, transaction_classifications.merchant_normalized),
+          updated_at=CURRENT_TIMESTAMP
+    """
+    params = [
+        (
+            r["transaction_id"],
+            int(bool(r.get("exclude_from_spend", 0))),
+            r.get("exclude_reason"),
+            r.get("user_category"),
+            r.get("user_subcategory"),
+            r.get("merchant_normalized"),
+        )
+        for r in rows
+    ]
+    with _db_connect() as conn:
+        conn.executemany(sql, params)
+        conn.commit()
+    return len(rows)
+
+
 def get_transactions_for_classification(days: int = 365, item_id: str | None = None) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
 
@@ -639,7 +694,7 @@ def insert_classification_rule(
     merchant_normalized: str | None = None,
     priority: int = 100,
 ) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.execute(
             """
@@ -673,7 +728,7 @@ def insert_classification_rule(
 
 
 def classification_exists(transaction_id: str) -> bool:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         row = conn.execute(
             "SELECT 1 FROM transaction_classifications WHERE transaction_id = ? LIMIT 1",
@@ -721,7 +776,7 @@ def apply_best_rule_to_transaction(transaction_id: str) -> dict | None:
     name_norm = normalize_merchant(tx.get("name"))
     merchant_norm = normalize_merchant(tx.get("merchant_name"))
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
         rules = conn.execute(
@@ -761,7 +816,7 @@ def apply_rules_bulk(days: int = 365, item_id: str | None = None) -> dict:
     """
     Apply rules to recent transactions; does not override existing classifications.
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
 
@@ -798,7 +853,7 @@ def _resolve_53_checking_account_id() -> str | None:
     if not DB_PATH.exists():
         return None
     try:
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = _db_connect()
         conn.row_factory = sqlite3.Row
         row = conn.execute("""
             SELECT a.account_id
@@ -820,7 +875,7 @@ def _resolve_53_checking_account_id() -> str | None:
 # Logging helper
 # -----------------------------
 def log_event_db(source: str, level: str, message: str) -> None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute(
             """
@@ -835,7 +890,7 @@ def log_event_db(source: str, level: str, message: str) -> None:
 # canonical “read” helpers
 # -----------------------------
 def get_accounts_canonical(item_id: str | None = None) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
 
@@ -876,7 +931,7 @@ def get_transactions_canonical(
     limit: int = 500,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
 
@@ -920,7 +975,7 @@ def get_spend_canonical(
     limit: int = 500,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
 
@@ -973,7 +1028,7 @@ def delete_item_local(item_id: str) -> None:
     Delete all local rows related to a Plaid item_id.
     Order matters if FK constraints exist.
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         cur = conn.cursor()
 
@@ -990,7 +1045,7 @@ def delete_item_local(item_id: str) -> None:
 
 
 def get_item_by_id(item_id: str) -> dict | None:
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
         row = conn.execute(
