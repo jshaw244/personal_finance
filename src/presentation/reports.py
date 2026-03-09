@@ -891,26 +891,48 @@ def api_calendar_events():
     # whose transfer Monday falls inside this month is included.
     scan_start = month_start - timedelta(days=6)
     d = anchor
+    # Walk to the last payday on or before month_end
     while d > month_end:
         d -= timedelta(days=cadence)
-    while d + timedelta(days=cadence) <= scan_start:
-        d += timedelta(days=cadence)
+    # Back up to the earliest payday still within the scan window
+    while d - timedelta(days=cadence) >= scan_start:
+        d -= timedelta(days=cadence)
+
+    # Payday-linked transfers (no "day" field) vs fixed-date transfers (have "day" field)
+    payday_transfers = [t for t in sched["transfers"] if "day" not in t]
+    fixed_transfers  = [t for t in sched["transfers"] if "day" in t]
 
     while d <= month_end:
         if month_start <= d <= month_end:
             events.append({"date": d.isoformat(), "type": "payday", "name": "Payday"})
 
-        # Monday after payday (weekday Mon=0 … Fri=4 → +3 days)
-        days_to_mon  = (7 - d.weekday()) % 7 or 7
-        transfer_dt  = d + timedelta(days=days_to_mon)
+        # Monday after payday for payday-linked transfers
+        days_to_mon = (7 - d.weekday()) % 7 or 7
+        transfer_dt = d + timedelta(days=days_to_mon)
         if month_start <= transfer_dt <= month_end:
-            for t in sched["transfers"]:
+            for t in payday_transfers:
                 events.append({"date": transfer_dt.isoformat(), "type": "transfer", "name": t["name"]})
 
         d += timedelta(days=cadence)
 
+    # ── Fixed-date transfers (e.g. House Holdings on the 27th) ─────────────────
+    for t in fixed_transfers:
+        actual_day = min(t["day"], days_in_month)
+        events.append({"date": date(year, mon, actual_day).isoformat(), "type": "transfer", "name": t["name"]})
+
+    # ── Monthly income (e.g. House Holdings income on the 15th) ───────────────
+    for inc in sched.get("income", []):
+        actual_day = min(inc["day"], days_in_month)
+        events.append({"date": date(year, mon, actual_day).isoformat(), "type": "income", "name": inc["name"]})
+
     # ── Bills ─────────────────────────────────────────────────────────────────
     for bill in sched["bills"]:
+        # Skip if this bill has a multi-month cadence and this isn't a due month
+        if "cadence_months" in bill:
+            anchor_bill = date.fromisoformat(bill["anchor_date"])
+            months_offset = (year - anchor_bill.year) * 12 + (mon - anchor_bill.month)
+            if months_offset < 0 or months_offset % bill["cadence_months"] != 0:
+                continue
         actual_day = min(bill["day"], days_in_month)
         events.append({
             "date":     date(year, mon, actual_day).isoformat(),
@@ -936,87 +958,355 @@ def api_calendar_events():
         pass
 
     # 2. Recent income transactions (payday amounts)
-    # 3. Recent utility/bill transaction amounts (tx_match lookup)
+    # 3. tx_match lookups — this month's actual + most recent for estimates
     income_list: list[tuple[str, float]] = []
-    bill_tx_amounts: dict[str, float] = {}
+    recent_income_list: list[tuple[str, float]] = []
+    tx_match_this_month: dict[str, float] = {}              # first (scheduled) payment this month
+    cc_extra_payments: dict[str, list[tuple[str, float]]] = {}  # additional CC payments this month
+    tx_match_latest: dict[str, float] = {}                  # most recent ever (estimate fallback)
     try:
         conn = sqlite3.connect(str(DB_PATH), timeout=30)
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA busy_timeout=30000;")
         conn.row_factory = sqlite3.Row
         try:
+            # Income for the viewed month — used for actual payday detection (any month with data)
             rows = conn.execute("""
                 SELECT t.date, ABS(t.amount) AS amount
                 FROM transactions t
                 JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
                 WHERE tc.user_category = 'Income' AND IFNULL(t.pending, 0) = 0
-                ORDER BY t.date DESC LIMIT 5
-            """).fetchall()
+                  AND ABS(t.amount) > 0
+                  AND t.date >= ? AND t.date <= ?
+                ORDER BY t.date DESC
+            """, (month_start.isoformat(), month_end.isoformat())).fetchall()
             income_list = [(r["date"], float(r["amount"])) for r in rows]
 
-            for bill in sched["bills"]:
-                kw = (bill.get("tx_match") or "").lower().strip()
+            # Most recent income globally — estimate baseline for future months with no data yet
+            recent_rows = conn.execute("""
+                SELECT t.date, ABS(t.amount) AS amount
+                FROM transactions t
+                JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+                WHERE tc.user_category = 'Income' AND IFNULL(t.pending, 0) = 0
+                  AND ABS(t.amount) > 0
+                ORDER BY t.date DESC LIMIT 10
+            """).fetchall()
+            recent_income_list = [(r["date"], float(r["amount"])) for r in recent_rows]
+
+            for item in sched["bills"] + sched.get("income", []):
+                kw = (item.get("tx_match") or "").lower().strip()
                 if not kw:
                     continue
-                row = conn.execute("""
-                    SELECT ABS(amount) AS amount
-                    FROM transactions
+                is_cc = bool(item.get("plaid_match"))
+                acct_subtype = (item.get("tx_account_subtype") or "").strip()
+                acct_filter_sql = (
+                    "AND account_id IN (SELECT account_id FROM accounts WHERE subtype = ?) "
+                    if acct_subtype else ""
+                )
+                acct_params = (acct_subtype,) if acct_subtype else ()
+                if is_cc:
+                    # Credit cards: fetch ALL transactions in month (ASC = scheduled first)
+                    cc_rows = conn.execute(f"""
+                        SELECT date, ABS(amount) AS amount FROM transactions
+                        WHERE (LOWER(name) LIKE ? OR LOWER(merchant_name) LIKE ?)
+                          AND date >= ? AND date <= ?
+                          AND IFNULL(pending, 0) = 0
+                          {acct_filter_sql}
+                        ORDER BY date ASC
+                    """, (f"%{kw}%", f"%{kw}%", month_start.isoformat(), month_end.isoformat()) + acct_params).fetchall()
+                    if cc_rows:
+                        tx_match_this_month[item["name"]] = float(cc_rows[0]["amount"])
+                        if len(cc_rows) > 1:
+                            cc_extra_payments[item["name"]] = [
+                                (r["date"], float(r["amount"])) for r in cc_rows[1:]
+                            ]
+                else:
+                    # Non-CC: earliest match only
+                    row = conn.execute(f"""
+                        SELECT ABS(amount) AS amount FROM transactions
+                        WHERE (LOWER(name) LIKE ? OR LOWER(merchant_name) LIKE ?)
+                          AND date >= ? AND date <= ?
+                          AND IFNULL(pending, 0) = 0
+                          {acct_filter_sql}
+                        ORDER BY date ASC LIMIT 1
+                    """, (f"%{kw}%", f"%{kw}%", month_start.isoformat(), month_end.isoformat()) + acct_params).fetchone()
+                    if row:
+                        tx_match_this_month[item["name"]] = float(row["amount"])
+                # self_payment: check for payments (negative amounts) on the CC account itself
+                if item.get("self_payment") and item.get("plaid_match") and item["name"] not in tx_match_this_month:
+                    pm_lower = item["plaid_match"].lower()
+                    sp_rows = conn.execute("""
+                        SELECT t.date, ABS(t.amount) AS amount
+                        FROM transactions t
+                        JOIN accounts a ON a.account_id = t.account_id
+                        WHERE LOWER(a.name) LIKE ? AND t.amount < 0
+                          AND t.date >= ? AND t.date <= ?
+                          AND IFNULL(t.pending, 0) = 0
+                        ORDER BY t.date ASC
+                    """, (f"%{pm_lower}%", month_start.isoformat(), month_end.isoformat())).fetchall()
+                    if sp_rows:
+                        tx_match_this_month[item["name"]] = float(sp_rows[0]["amount"])
+                        if len(sp_rows) > 1:
+                            existing = cc_extra_payments.get(item["name"], [])
+                            cc_extra_payments[item["name"]] = existing + [
+                                (r["date"], float(r["amount"])) for r in sp_rows[1:]
+                            ]
+                # Latest ever: fallback estimate for months with no actual yet
+                row = conn.execute(f"""
+                    SELECT ABS(amount) AS amount FROM transactions
                     WHERE (LOWER(name) LIKE ? OR LOWER(merchant_name) LIKE ?)
                       AND IFNULL(pending, 0) = 0
+                      {acct_filter_sql}
                     ORDER BY date DESC LIMIT 1
-                """, (f"%{kw}%", f"%{kw}%")).fetchone()
+                """, (f"%{kw}%", f"%{kw}%") + acct_params).fetchone()
                 if row:
-                    bill_tx_amounts[bill["name"]] = float(row["amount"])
+                    tx_match_latest[item["name"]] = float(row["amount"])
         finally:
             conn.close()
     except Exception:
         pass
 
-    # Payday estimate: 2nd-most-recent income transaction amount
-    payday_estimate = income_list[1][1] if len(income_list) >= 2 else (
-                      income_list[0][1] if income_list else None)
+    # Payday estimate: use viewed month's income if available, else fall back to recent history
+    estimate_source = income_list if income_list else recent_income_list
+    payday_estimate = estimate_source[1][1] if len(estimate_source) >= 2 else (
+                      estimate_source[0][1] if estimate_source else None)
 
-    # Build a bill config lookup for quick access
+    # Build a combined config lookup for bills + transfers + income (for amount_override support)
     bill_cfg_map = {b["name"]: b for b in sched["bills"]}
+    bill_cfg_map.update({t["name"]: t for t in sched["transfers"]})
+    bill_cfg_map.update({i["name"]: i for i in sched.get("income", [])})
+
+    # Month-specific overrides take priority over global amount_override
+    month_str = f"{year}-{mon:02d}"
+    monthly_overrides: dict = sched.get("monthly_overrides", {}).get(month_str, {})
+
+    # Payday pass 1: expand actual payday events — one badge per deposit
+    expanded = []
+    latest_actual_total = None
+    for ev in events:
+        if ev["type"] != "payday":
+            expanded.append(ev)
+            continue
+        ev_date = date.fromisoformat(ev["date"])
+        deposits = [
+            (d, amt) for d, amt in income_list
+            if amt > 0 and abs((date.fromisoformat(d) - ev_date).days) <= 2
+        ]
+        if deposits:
+            latest_actual_total = sum(amt for _, amt in deposits)
+            for dep_date, dep_amt in deposits:
+                expanded.append({**ev, "date": dep_date, "amount": dep_amt, "amount_type": "actual"})
+        else:
+            expanded.append(ev)
+    events = sorted(expanded, key=lambda e: e["date"])
+
+    # Payday pass 2: estimate future paydays using most recent actual total
+    estimate_total = latest_actual_total if latest_actual_total is not None else payday_estimate
+    for ev in events:
+        if ev["type"] == "payday" and "amount" not in ev and estimate_total is not None:
+            ev["amount"] = estimate_total
+            ev["amount_type"] = "estimate"
 
     for ev in events:
         cfg = bill_cfg_map.get(ev["name"], {})
 
-        # Static override wins everything
-        if cfg.get("amount_override"):
-            ev["amount"] = float(cfg["amount_override"])
-            ev["amount_type"] = "static"
-            continue
-
-        if ev["type"] == "payday":
-            ev_date = date.fromisoformat(ev["date"])
-            actual = next(
-                (amt for d, amt in income_list
-                 if abs((date.fromisoformat(d) - ev_date).days) <= 2),
-                None,
-            )
-            if actual is not None:
-                ev["amount"] = actual
+        if ev["type"] == "bill":
+            # Priority 1: actual transaction from this month
+            if ev["name"] in tx_match_this_month:
+                ev["amount"] = tx_match_this_month[ev["name"]]
                 ev["amount_type"] = "actual"
-            elif payday_estimate is not None:
-                ev["amount"] = payday_estimate
-                ev["amount_type"] = "estimate"
+            else:
+                # Priority 2: Plaid statement balance
+                pm = (cfg.get("plaid_match") or "").lower().strip()
+                if pm:
+                    for acct_name, bal in cc_by_name.items():
+                        if pm in acct_name:
+                            ev["amount"] = bal
+                            ev["amount_type"] = "statement"
+                            break
+                # Priority 3a: month-specific manual override
+                if "amount" not in ev and ev["name"] in monthly_overrides:
+                    ev["amount"] = float(monthly_overrides[ev["name"]])
+                    ev["amount_type"] = "static"
+                # Priority 3b: global static override (plan/budget default)
+                if "amount" not in ev and "amount_override" in cfg and cfg["amount_override"] is not None:
+                    ev["amount"] = float(cfg["amount_override"])
+                    ev["amount_type"] = "static"
+                # Priority 4: most recent transaction ever (estimate)
+                if "amount" not in ev and ev["name"] in tx_match_latest:
+                    ev["amount"] = tx_match_latest[ev["name"]]
+                    ev["amount_type"] = "estimate"
+        else:
+            # transfers and income: month-specific override → global override
+            if ev["name"] in monthly_overrides:
+                ev["amount"] = float(monthly_overrides[ev["name"]])
+                ev["amount_type"] = "static"
+            elif "amount_override" in cfg and cfg["amount_override"] is not None:
+                ev["amount"] = float(cfg["amount_override"])
+                ev["amount_type"] = "static"
 
-        elif ev["type"] == "bill":
-            # a) Plaid statement balance
-            pm = (cfg.get("plaid_match") or "").lower().strip()
-            if pm:
-                for acct_name, bal in cc_by_name.items():
-                    if pm in acct_name:
-                        ev["amount"] = bal
-                        ev["amount_type"] = "statement"
-                        break
-            # b) Recent matching transaction
-            if "amount" not in ev and ev["name"] in bill_tx_amounts:
-                ev["amount"] = bill_tx_amounts[ev["name"]]
-                ev["amount_type"] = "estimate"
+        # Stamp occurred flag
+        if ev["type"] == "payday":
+            ev["occurred"] = ev.get("amount_type") == "actual"
+        elif ev["type"] in ("bill", "income"):
+            ev["occurred"] = ev["name"] in tx_match_this_month
+        else:
+            ev["occurred"] = False
+
+    # Append extra CC payment events on their actual dates
+    bill_auto_map = {b["name"]: b.get("auto_pay", False) for b in sched["bills"]}
+    for bill_name, extras in cc_extra_payments.items():
+        for pay_date, pay_amt in extras:
+            events.append({
+                "date":       pay_date,
+                "type":       "bill",
+                "name":       bill_name,
+                "auto_pay":   bill_auto_map.get(bill_name, False),
+                "amount":     pay_amt,
+                "amount_type": "actual",
+                "occurred":   True,
+            })
+
+    # Misc checking transactions: all actual money movement not covered by scheduled events
+    def _clean_misc_name(raw):
+        n = raw.upper()
+        if "ATM WITHDRAWAL" in n:
+            return "ATM"
+        if "SENT ZELLE PMT" in n and " TO " in n:
+            return "Zelle \u2192 " + raw.split(" TO ")[-1].strip().title()
+        if "RECEIVED ZELLE PMT" in n and " FROM " in n:
+            return "Zelle \u2190 " + raw.split(" FROM ")[-1].strip().title()
+        if "5/3 ONLINE TRANSFER FROM" in n:
+            return "53 Savings \u2190"
+        if "SCHWAB BROKERAGE MONEYLINK" in n:
+            return "Schwab \u2190"
+        if "WEB INITIATED PAYMENT AT " in n:
+            after = n.split("WEB INITIATED PAYMENT AT ")[1]
+            _stop = {"CK", "SV", "WEBXFR", "PURCHASE", "TRANSFER", "PAYMENT",
+                     "BILLPAY", "ADDISON", "GAS", "BANK"}
+            parts = []
+            for word in after.split():
+                if word in _stop or re.match(r'^[A-Z0-9]{8,}$', word):
+                    break
+                parts.append(word)
+            return " ".join(parts).title() if parts else after.split()[0].title()
+        cleaned = re.sub(r"\s+\w{8,}\s*\d{6}\s*$", "", raw).strip()
+        return cleaned[:35]
+
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=30000;")
+        conn.row_factory = sqlite3.Row
+        try:
+            # Build outgoing-only exclusions from scheduled tx_match patterns
+            sched_out_kws = [
+                item["tx_match"].lower()
+                for item in sched.get("bills", []) + sched.get("income", [])
+                if item.get("tx_match")
+            ]
+            # Scheduled transfers without tx_match — exclude only when positive (outgoing)
+            extra_out_kws = [
+                "schwab bank transfer",
+                "schwab brokerage moneylink",
+                "synchrony bank transfer",
+                "edward jones investment",
+                "american airlines",
+                "5/3 online transfer",
+                "capital one transfer",
+            ]
+            all_out_kws = sched_out_kws + extra_out_kws
+            out_excl = " ".join(
+                "AND NOT (t.amount > 0 AND LOWER(t.name) LIKE ?)" for _ in all_out_kws
+            )
+            out_params = tuple(f"%{kw}%" for kw in all_out_kws)
+
+            misc_rows = conn.execute(f"""
+                SELECT t.date, t.name, t.amount
+                FROM transactions t
+                JOIN accounts a ON a.account_id = t.account_id
+                WHERE a.subtype = 'checking'
+                  AND t.amount != 0
+                  AND t.date >= ? AND t.date <= ?
+                  AND IFNULL(t.pending, 0) = 0
+                  AND LOWER(t.name) NOT LIKE '%allstate payroll%'
+                  AND LOWER(t.name) NOT LIKE '%anne azzo%'
+                  {out_excl}
+                ORDER BY t.date ASC
+            """, (month_start.isoformat(), month_end.isoformat()) + out_params).fetchall()
+        finally:
+            conn.close()
+
+        for row in misc_rows:
+            direction = "in" if row["amount"] < 0 else "out"
+            events.append({
+                "date":        row["date"],
+                "type":        "cash",
+                "direction":   direction,
+                "name":        _clean_misc_name(row["name"]),
+                "amount":      abs(float(row["amount"])),
+                "amount_type": "actual",
+                "occurred":    True,
+            })
+    except Exception:
+        pass
+
+    events.sort(key=lambda e: e["date"])
 
     return jsonify(events)
+
+
+@reports_bp.route("/api/schedule_amounts", methods=["GET", "POST"])
+@login_required
+def api_schedule_amounts():
+    """GET: return amount for all income + bills + transfers for a given month.
+            Monthly override takes priority over global amount_override.
+       POST: save overrides into monthly_overrides[month] in schedules.json."""
+    from src.common.paths import PROJECT_ROOT
+    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+
+    with open(sched_path, encoding="utf-8") as f:
+        sched = json.load(f)
+
+    month_param = (request.args.get("month") or "").strip()
+    if not month_param:
+        month_param = date.today().strftime("%Y-%m")
+    month_overrides: dict = sched.setdefault("monthly_overrides", {}).get(month_param, {})
+
+    def effective_amount(item):
+        if item["name"] in month_overrides:
+            return month_overrides[item["name"]]
+        return item.get("amount_override")
+
+    if request.method == "GET":
+        return jsonify({
+            "income":    [{"name": i["name"], "amount_override": effective_amount(i)} for i in sched.get("income", [])],
+            "bills":     [{"name": b["name"], "amount_override": effective_amount(b)} for b in sched["bills"]],
+            "transfers": [{"name": t["name"], "amount_override": effective_amount(t)} for t in sched["transfers"]],
+        })
+
+    # POST — save overrides into the month-specific bucket only
+    body = request.get_json() or {}
+    overrides = body.get("overrides", {})
+    month_param = body.get("month", month_param)
+
+    bucket = sched.setdefault("monthly_overrides", {}).setdefault(month_param, {})
+    all_items = sched.get("income", []) + sched["bills"] + sched["transfers"]
+    for item in all_items:
+        name = item["name"]
+        raw = str(overrides.get(name, "")).strip()
+        if raw:
+            try:
+                bucket[name] = float(raw)
+            except ValueError:
+                pass
+        elif name in bucket:
+            del bucket[name]
+
+    with open(sched_path, "w", encoding="utf-8") as f:
+        json.dump(sched, f, indent=2)
+
+    return jsonify({"ok": True})
 
 
 @reports_bp.route("/api/calendar_2week")

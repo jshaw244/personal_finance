@@ -1,93 +1,132 @@
 {
   "payday": {
     "cadence_days": 14,
-    "anchor_date": "2026-03-06"
+    "anchor_date": "2026-03-05"
   },
+  "income": [
+    {
+      "name": "House Holdings",
+      "day": 15,
+      "amount_override": 650.0,
+      "tx_match": "anne azzo"
+    }
+  ],
   "bills": [
     {
       "name": "53 Credit Card",
       "day": 5,
       "auto_pay": true,
-      "plaid_match": "fifth third"
+      "plaid_match": "fifth third",
+      "tx_match": "fifth third bank web pay"
     },
     {
       "name": "Village of Addison",
       "day": 12,
       "auto_pay": true,
-      "tx_match": "addison"
+      "tx_match": "villageaddison",
+      "cadence_months": 2,
+      "anchor_date": "2026-01-12"
     },
     {
       "name": "Amex CC",
       "day": 13,
       "auto_pay": true,
-      "plaid_match": "american express"
+      "plaid_match": "american express",
+      "tx_match": "amex epayment",
+      "amount_override": 2131.89
     },
     {
       "name": "Amazon CC",
       "day": 20,
       "auto_pay": true,
-      "plaid_match": "amazon store"
+      "plaid_match": "amazon store",
+      "tx_match": "amz_storecrd_pmt",
+      "amount_override": 2.99
     },
     {
       "name": "Chase Amazon CC",
       "day": 20,
       "auto_pay": true,
-      "plaid_match": "chase amazon"
+      "plaid_match": "chase amazon",
+      "tx_match": "chase credit crd autopay",
+      "amount_override": 723.07
     },
     {
       "name": "Electric",
       "day": 20,
       "auto_pay": true,
-      "tx_match": "comed"
+      "tx_match": "comed",
+      "amount_override": 120.6
     },
     {
       "name": "Cap One CC",
       "day": 21,
       "auto_pay": true,
-      "plaid_match": "capital one"
+      "plaid_match": "capital one",
+      "tx_match": "capital one crcardpmt",
+      "amount_override": 0.0
     },
     {
       "name": "Mortgage Transfer",
       "day": 23,
       "auto_pay": true,
-      "tx_match": "mortgage"
-    },
-    {
-      "name": "House Holdings",
-      "day": 27,
-      "auto_pay": true
+      "tx_match": "libebk",
+      "amount_override": 381.0
     },
     {
       "name": "Best Buy CC",
       "day": 28,
       "auto_pay": false,
-      "plaid_match": "best buy"
+      "plaid_match": "best buy",
+      "tx_match": "best buy",
+      "tx_account_subtype": "checking",
+      "amount_override": 38.0
     },
     {
       "name": "Gas",
       "day": 28,
       "auto_pay": true,
-      "tx_match": "nicor"
-    },
-    {
-      "name": "Cable/Internet",
-      "day": 31,
-      "auto_pay": true,
-      "tx_match": "comcast"
+      "tx_match": "nicor",
+      "amount_override": 117.94
     },
     {
       "name": "Cell Phone",
       "day": 31,
       "auto_pay": true,
-      "tx_match": ""
+      "tx_match": "att payment",
+      "amount_override": 37.46
     }
   ],
   "transfers": [
-    { "name": "53 Savings" },
-    { "name": "AA Credit Union" },
-    { "name": "Capital One Savings" },
-    { "name": "Schwab Checking" },
-    { "name": "Synchrony IRA" },
-    { "name": "Tax Savings (HYS)" }
-  ]
+    {
+      "name": "53 Savings",
+      "amount_override": 100.0
+    },
+    {
+      "name": "AA Credit Union",
+      "amount_override": 100.0
+    },
+    {
+      "name": "Capital One Savings",
+      "amount_override": 100.0
+    },
+    {
+      "name": "Schwab Checking",
+      "amount_override": 100.0
+    },
+    {
+      "name": "Synchrony IRA",
+      "amount_override": 300.0
+    },
+    {
+      "name": "Tax Savings (HYS)",
+      "amount_override": 900.0
+    },
+    {
+      "name": "House Holdings",
+      "day": 27,
+      "amount_override": 650.0
+    }
+  ],
+  "monthly_overrides": {}
 }
