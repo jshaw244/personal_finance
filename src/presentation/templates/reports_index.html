@@ -40,11 +40,28 @@
       .cal-cell.other-month { background:#fafafa; }
       .cal-day-num { font-weight:700; margin-bottom:.25rem; color:#333; }
       .badge { display:inline-block; border-radius:4px; padding:.08rem .35rem; font-size:.72rem; font-weight:600; margin:.1rem .1rem 0 0; white-space:nowrap; overflow:hidden; max-width:100%; text-overflow:ellipsis; }
-      .badge.pay       { background:#d4edda; color:#155724; }
-      .badge.xfer      { background:#cce5ff; color:#004085; }
-      .badge.bill-auto { background:#fff3cd; color:#856404; }
-      .badge.bill-man  { background:#f8d7da; color:#721c24; }
+      .badge.pay        { background:#d4edda; color:#155724; }
+      .badge.income-fix { background:#a8d8a8; color:#1a4731; }
+      .badge.xfer       { background:#cce5ff; color:#004085; }
+      .badge.bill-auto  { background:#fff3cd; color:#856404; }
+      .badge.bill-man   { background:#f8d7da; color:#721c24; }
+      .badge.cash-out   { background:#e2e3e5; color:#383d41; }
+      .badge.cash-in    { background:#d1ecf1; color:#0c5460; }
+      .badge.done { opacity:.55; }
       .cal-legend { margin-top:.75rem; display:flex; gap:1rem; flex-wrap:wrap; font-size:.85rem; }
+
+      /* Amount override modal */
+      .modal-backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; align-items:center; justify-content:center; }
+      .modal-backdrop.open { display:flex; }
+      .modal { background:#fff; border-radius:10px; padding:1.5rem; width:420px; max-width:95vw; max-height:85vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,.2); }
+      .modal h3 { margin:0 0 1rem; }
+      .modal h4 { margin:.75rem 0 .4rem; font-size:.85rem; text-transform:uppercase; letter-spacing:.05em; color:#666; border-bottom:1px solid #eee; padding-bottom:.25rem; }
+      .amount-row { display:flex; align-items:center; justify-content:space-between; margin:.35rem 0; gap:.5rem; }
+      .amount-row label { font-size:.9rem; flex:1; }
+      .amount-row input { width:110px; padding:.3rem .4rem; border:1px solid #ccc; border-radius:5px; font-size:.9rem; text-align:right; }
+      .modal-actions { display:flex; justify-content:flex-end; gap:.5rem; margin-top:1rem; }
+      .btn-secondary { background:#6c757d; }
+      .btn-secondary:hover { background:#545b62; }
     </style>
     <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   </head>
@@ -72,17 +89,45 @@
 
     <div class="panel" id="cal-panel">
       <h2>Schedule Calendar</h2>
-      <div style="display:flex; gap:.75rem; align-items:center;">
+      <div style="display:flex; gap:.75rem; align-items:center; flex-wrap:wrap;">
         <button onclick="shiftCal(-1)">&#8592; Prev</button>
         <strong id="cal-month-label" style="min-width:160px; text-align:center;"></strong>
         <button onclick="shiftCal(1)">Next &#8594;</button>
+        <button onclick="openAmountsModal()" style="margin-left:auto; background:#6c757d;">Edit Amounts</button>
       </div>
       <div id="cal-grid" class="cal-grid"></div>
       <div class="cal-legend">
         <span><span class="badge pay">Payday</span> Payday</span>
-        <span><span class="badge xfer">Xfer</span> Transfer (Mon after payday)</span>
+        <span><span class="badge income-fix">Income</span> Fixed monthly income</span>
+        <span><span class="badge xfer">Xfer</span> Transfer</span>
         <span><span class="badge bill-auto">Bill</span> Bill — auto pay</span>
         <span><span class="badge bill-man">Bill</span> Bill — manual pay</span>
+        <span><span class="badge cash-out">←</span> Other cash out</span>
+        <span><span class="badge cash-in">→</span> Other cash in</span>
+      </div>
+    </div>
+
+    <!-- Amount override modal -->
+    <div class="modal-backdrop" id="amounts-modal">
+      <div class="modal">
+        <h3>Set Amounts — <span id="amounts-modal-month"></span></h3>
+        <p style="font-size:.85rem; color:#666; margin-top:-.5rem;">Enter known amounts for this month's bills and transfers. Leave blank to use the default. Changes apply to this month only.</p>
+        <div id="amounts-income-section">
+          <h4>Monthly Income</h4>
+          <div id="amounts-income"></div>
+        </div>
+        <div id="amounts-bills-section">
+          <h4>Bills</h4>
+          <div id="amounts-bills"></div>
+        </div>
+        <div id="amounts-transfers-section">
+          <h4>Transfers</h4>
+          <div id="amounts-transfers"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeAmountsModal()">Cancel</button>
+          <button onclick="saveAmounts()">Save</button>
+        </div>
       </div>
     </div>
 
@@ -209,16 +254,22 @@
         const ds = `${calYear}-${String(calMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
         html += `<div class="cal-cell${ds === todayStr ? ' today' : ''}"><div class="cal-day-num">${day}</div>`;
         (byDate[ds] || []).forEach(e => {
-          const fmtAmt = a => '$' + Number(a).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-          const est = e.amount_type === 'estimate' || e.amount_type === 'static';
-          const amtStr = e.amount != null ? ' ' + fmtAmt(e.amount) + (est ? '*' : '') : '';
+          const fmtAmt = a => '$' + Number(a ?? 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+          const isEst  = e.amount_type === 'estimate';
+          const amtStr = ' ' + fmtAmt(e.amount) + (isEst ? '*' : '');
+          const done   = e.occurred ? ' done' : '';
+          const chk    = e.occurred ? '✓ ' : '';
           const typeHint = {actual:'Actual', statement:'Statement bal.', estimate:'Estimated', static:'Manual'}[e.amount_type] || '';
           if (e.type === 'payday')
-            html += `<span class="badge pay" title="${typeHint}">Payday${amtStr}</span>`;
+            html += `<span class="badge pay${done}" title="${typeHint}">${chk}Payday${amtStr}</span>`;
           else if (e.type === 'transfer')
-            html += `<span class="badge xfer">${e.name}</span>`;
+            html += `<span class="badge xfer${done}" title="${typeHint}">${chk}${e.name}${amtStr}</span>`;
+          else if (e.type === 'income')
+            html += `<span class="badge income-fix${done}" title="${e.name} — ${typeHint}">${chk}${e.name}${amtStr}</span>`;
           else if (e.type === 'bill')
-            html += `<span class="badge ${e.auto_pay ? 'bill-auto' : 'bill-man'}" title="${e.name} — ${typeHint}">${e.name}${amtStr}</span>`;
+            html += `<span class="badge ${e.auto_pay ? 'bill-auto' : 'bill-man'}${done}" title="${e.name} — ${typeHint}">${chk}${e.name}${amtStr}</span>`;
+          else if (e.type === 'cash')
+            html += `<span class="badge ${e.direction === 'in' ? 'cash-in' : 'cash-out'}" title="${e.name}">✓ ${e.name}${amtStr}</span>`;
         });
         html += `</div>`;
       }
@@ -227,6 +278,62 @@
       for (let i = 0; i < trailing; i++) html += `<div class="cal-cell other-month"></div>`;
       document.getElementById('cal-grid').innerHTML = html;
     }
+
+    // ── Amount override modal ────────────────────────────────────────────────
+    async function openAmountsModal() {
+      const monthStr = `${calYear}-${String(calMonth).padStart(2,'0')}`;
+      const label = new Date(calYear, calMonth-1, 1).toLocaleString('default', {month:'long', year:'numeric'});
+      document.getElementById('amounts-modal-month').textContent = label;
+
+      const data = await fetchJSON('/reports/api/schedule_amounts?month=' + monthStr);
+      const incomeEl = document.getElementById('amounts-income');
+      const billsEl  = document.getElementById('amounts-bills');
+      const xferEl   = document.getElementById('amounts-transfers');
+      incomeEl.innerHTML = '';
+      billsEl.innerHTML  = '';
+      xferEl.innerHTML   = '';
+
+      const makeRow = (name, current, container) => {
+        const row = document.createElement('div');
+        row.className = 'amount-row';
+        row.innerHTML = `<label>${name}</label>
+          <input type="number" step="0.01" min="0" placeholder="e.g. 150.00"
+            data-name="${name}" value="${current != null ? current : ''}">`;
+        container.appendChild(row);
+      };
+
+      (data.income    || []).forEach(i => makeRow(i.name, i.amount_override, incomeEl));
+      data.bills.forEach(b              => makeRow(b.name, b.amount_override, billsEl));
+      data.transfers.forEach(t          => makeRow(t.name, t.amount_override, xferEl));
+
+      document.getElementById('amounts-modal').classList.add('open');
+    }
+
+    function closeAmountsModal() {
+      document.getElementById('amounts-modal').classList.remove('open');
+    }
+
+    async function saveAmounts() {
+      const monthStr = `${calYear}-${String(calMonth).padStart(2,'0')}`;
+      const inputs = document.querySelectorAll('#amounts-modal input[data-name]');
+      const overrides = {};
+      inputs.forEach(inp => { overrides[inp.dataset.name] = inp.value; });
+
+      const resp = await fetch('/reports/api/schedule_amounts?month=' + monthStr, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({overrides, month: monthStr}),
+      });
+      if ((await resp.json()).ok) {
+        closeAmountsModal();
+        loadCal();
+      }
+    }
+
+    // Close modal on backdrop click
+    document.addEventListener('click', e => {
+      if (e.target.id === 'amounts-modal') closeAmountsModal();
+    });
 
     document.addEventListener('DOMContentLoaded', () => {
       const now = new Date();
