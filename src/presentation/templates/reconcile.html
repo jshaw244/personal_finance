@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Statement Reconciliation</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
+
+    .topbar {
+      background: #1a1a2e; color: #eee; padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
+    }
+    .topbar h1 { margin: 0; font-size: 1.1rem; color: #fff; }
+    .topbar a { color: #aad4f5; font-size: .9rem; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+
+    .page { padding: 1.25rem 1.5rem 3rem; max-width: 1300px; }
+
+    /* Upload card */
+    .upload-card {
+      background: #fff; border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,.08);
+      padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;
+    }
+    .upload-card h2 { margin: 0 0 1rem; font-size: 1rem; color: #333; }
+    .form-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+    .form-group { display: flex; flex-direction: column; gap: .3rem; }
+    .form-group label { font-size: .8rem; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: .04em; }
+    .form-group select,
+    .form-group input[type=text] {
+      padding: .4rem .65rem; border: 1px solid #ccd; border-radius: 6px;
+      font-size: .9rem; background: #fafafa; min-width: 160px;
+    }
+    .file-input-wrap {
+      display: flex; flex-direction: column; gap: .3rem;
+    }
+    .file-input-wrap label { font-size: .8rem; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: .04em; }
+    .file-input-wrap input[type=file] { font-size: .88rem; }
+    .btn-upload {
+      padding: .45rem 1.1rem; background: #0078d7; color: #fff;
+      border: none; border-radius: 6px; cursor: pointer; font-size: .9rem;
+      align-self: flex-end;
+    }
+    .btn-upload:hover { background: #005fa3; }
+    .btn-upload:disabled { background: #aaa; cursor: default; }
+
+    .note { font-size: .78rem; color: #888; margin-top: .6rem; }
+
+    /* Status / error banner */
+    .banner {
+      padding: .6rem 1rem; border-radius: 6px; font-size: .88rem; margin-bottom: 1rem;
+      display: none;
+    }
+    .banner.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; display: block; }
+    .banner.info  { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; display: block; }
+
+    /* Summary bar */
+    .summary-bar {
+      display: flex; gap: 1px; border-radius: 8px; overflow: hidden;
+      margin-bottom: 1.25rem; font-size: .88rem;
+    }
+    .summary-bar .seg { flex: 1; padding: .65rem 1rem; text-align: center; }
+    .seg-total    { background: #e8eef8; color: #1a3a6e; }
+    .seg-matched  { background: #d4edda; color: #155724; }
+    .seg-stmt     { background: #fff3cd; color: #856404; }
+    .seg-db       { background: #f8d7da; color: #721c24; }
+    .seg label { display: block; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .75; }
+    .seg .big  { font-size: 1.3rem; font-weight: 800; }
+    .seg .sub  { font-size: .75rem; margin-top: .1rem; opacity: .8; }
+
+    /* Match rate bar */
+    .match-bar-wrap { margin-bottom: 1.25rem; }
+    .match-bar-wrap label { font-size: .78rem; color: #555; margin-bottom: .25rem; display: block; }
+    .match-bar-bg { background: #e0e0e0; border-radius: 99px; height: 10px; overflow: hidden; }
+    .match-bar-fill { height: 100%; border-radius: 99px; background: #28a745; transition: width .4s; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: 1rem; }
+    .tab-btn {
+      padding: .5rem 1.1rem; border: none; background: none; cursor: pointer;
+      font-size: .88rem; color: #666; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; transition: color .15s;
+    }
+    .tab-btn.active { color: #0078d7; border-bottom-color: #0078d7; font-weight: 600; }
+    .tab-btn:hover:not(.active) { color: #333; }
+
+    /* Tables */
+    .results-section { display: none; }
+    .results-section.active { display: block; }
+
+    .data-table { width: 100%; border-collapse: collapse; font-size: .84rem; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    .data-table thead th {
+      background: #f8f9fa; padding: .45rem .75rem; text-align: left;
+      font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #666;
+      border-bottom: 2px solid #dee2e6; white-space: nowrap;
+    }
+    .data-table thead th.right { text-align: right; }
+    .data-table tbody td { padding: .35rem .75rem; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    .data-table tbody td.right { text-align: right; font-variant-numeric: tabular-nums; font-family: monospace; }
+    .data-table tbody tr:hover { background: #fafafa; }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+
+    .badge {
+      display: inline-block; padding: .15rem .45rem; border-radius: 4px;
+      font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+    }
+    .badge-match  { background: #d4edda; color: #155724; }
+    .badge-stmt   { background: #fff3cd; color: #856404; }
+    .badge-db     { background: #f8d7da; color: #721c24; }
+
+    .diff-amt { font-weight: 700; color: #c33; font-family: monospace; }
+    .subdesc  { font-size: .75rem; color: #888; }
+
+    /* History panel */
+    .history-panel {
+      background: #fff; border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,.08);
+      padding: 1rem 1.25rem; margin-top: 1.5rem;
+    }
+    .history-panel h3 { margin: 0 0 .75rem; font-size: .95rem; color: #444; }
+
+    .loading { padding: 2rem; text-align: center; color: #888; }
+    .empty   { padding: 1.5rem; text-align: center; color: #aaa; font-style: italic; font-size: .9rem; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Statement Reconciliation</h1>
+  <a href="/reports">← Reports</a>
+  <a href="/reports/monthly">Monthly Cashflow</a>
+  <a href="/reports/paycalendar">Pay-Period Calendar</a>
+</div>
+
+<div class="page">
+
+  <!-- Upload form -->
+  <div class="upload-card">
+    <h2>Upload Bank Statement (CSV)</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Account Type</label>
+        <select id="account-type">
+          <option value="checking">Checking</option>
+          <option value="savings">Savings</option>
+          <option value="credit">Credit Card</option>
+          <option value="mortgage">Mortgage</option>
+          <option value="retirement">Retirement / Brokerage</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Institution (optional)</label>
+        <input type="text" id="institution" placeholder="e.g. Fifth Third, Chase…">
+      </div>
+      <div class="file-input-wrap">
+        <label>Statement CSV</label>
+        <input type="file" id="file-input" accept=".csv,.tsv,.txt">
+      </div>
+      <button class="btn-upload" id="upload-btn" onclick="upload()">Reconcile</button>
+    </div>
+    <p class="note">
+      Most banks offer CSV export under Account Activity or Statements.
+      The file should have columns for Date, Description, and Amount (or Debit/Credit).
+      Checking/savings: export from the bank website. Credit cards: export from the card portal.
+      Mortgage and retirement statements are stored for reference (no Plaid data to compare).
+    </p>
+  </div>
+
+  <div class="banner" id="banner"></div>
+
+  <!-- Results (hidden until upload) -->
+  <div id="results" style="display:none">
+
+    <div class="summary-bar">
+      <div class="seg seg-total">
+        <label>Statement Transactions</label>
+        <div class="big" id="sum-stmt">—</div>
+        <div class="sub" id="sum-range">—</div>
+      </div>
+      <div class="seg seg-matched">
+        <label>Matched in App</label>
+        <div class="big" id="sum-matched">—</div>
+        <div class="sub" id="sum-rate">—</div>
+      </div>
+      <div class="seg seg-stmt">
+        <label>Only in Statement</label>
+        <div class="big" id="sum-only-stmt">—</div>
+        <div class="sub">not found in app</div>
+      </div>
+      <div class="seg seg-db">
+        <label>Only in App</label>
+        <div class="big" id="sum-only-db">—</div>
+        <div class="sub">not in statement</div>
+      </div>
+    </div>
+
+    <div class="match-bar-wrap">
+      <label id="match-bar-label">Match rate</label>
+      <div class="match-bar-bg"><div class="match-bar-fill" id="match-bar" style="width:0%"></div></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('matched')">
+        Matched <span id="tab-count-matched"></span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('only_statement')">
+        Only in Statement <span id="tab-count-only-stmt"></span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('only_db')">
+        Only in App <span id="tab-count-only-db"></span>
+      </button>
+    </div>
+
+    <div id="tab-matched" class="results-section active"></div>
+    <div id="tab-only_statement" class="results-section"></div>
+    <div id="tab-only_db" class="results-section"></div>
+  </div>
+
+  <!-- Upload history -->
+  <div class="history-panel">
+    <h3>Recent Uploads</h3>
+    <div id="history-list"><div class="loading">Loading…</div></div>
+  </div>
+
+</div>
+
+<script>
+function fmt(n) {
+  if (n == null) return '—';
+  return '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDate(s) {
+  if (!s) return '';
+  const [yr,mn,dy] = s.split('-').map(Number);
+  return `${mn}/${dy}/${yr}`;
+}
+
+let activeTab = 'matched';
+function switchTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', ['matched','only_statement','only_db'][i] === name);
+  });
+  document.querySelectorAll('.results-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+async function upload() {
+  const fileInput = document.getElementById('file-input');
+  if (!fileInput.files.length) {
+    showBanner('Please select a CSV file.', 'error'); return;
+  }
+  const btn = document.getElementById('upload-btn');
+  btn.disabled = true; btn.textContent = 'Processing…';
+  clearBanner();
+
+  const form = new FormData();
+  form.append('file', fileInput.files[0]);
+  form.append('account_type', document.getElementById('account-type').value);
+  form.append('institution', document.getElementById('institution').value);
+
+  try {
+    const r = await fetch('/reports/api/reconcile/upload', { method: 'POST', body: form });
+    const data = await r.json();
+    if (!r.ok) { showBanner(data.error || 'Upload failed', 'error'); return; }
+    renderResults(data);
+    loadHistory();
+  } catch(e) {
+    showBanner('Upload error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Reconcile';
+  }
+}
+
+function showBanner(msg, type) {
+  const el = document.getElementById('banner');
+  el.textContent = msg; el.className = 'banner ' + type;
+}
+function clearBanner() {
+  const el = document.getElementById('banner');
+  el.textContent = ''; el.className = 'banner';
+}
+
+function renderResults(data) {
+  const s = data.summary;
+  document.getElementById('results').style.display = 'block';
+  document.getElementById('sum-stmt').textContent    = s.statement_count;
+  document.getElementById('sum-matched').textContent = s.matched_count;
+  document.getElementById('sum-only-stmt').textContent = s.only_statement_count;
+  document.getElementById('sum-only-db').textContent   = s.only_db_count;
+  document.getElementById('sum-range').textContent =
+    data.date_range ? fmtDate(data.date_range.start) + ' – ' + fmtDate(data.date_range.end) : '';
+  document.getElementById('sum-rate').textContent = s.match_rate + '% match rate';
+  document.getElementById('match-bar-label').textContent =
+    `Match rate: ${s.match_rate}%  (${s.matched_count} of ${s.statement_count} statement transactions found in app)`;
+  document.getElementById('match-bar').style.width = s.match_rate + '%';
+  document.getElementById('match-bar').style.background =
+    s.match_rate >= 90 ? '#28a745' : s.match_rate >= 70 ? '#ffc107' : '#dc3545';
+
+  document.getElementById('tab-count-matched').textContent  = `(${s.matched_count})`;
+  document.getElementById('tab-count-only-stmt').textContent = `(${s.only_statement_count})`;
+  document.getElementById('tab-count-only-db').textContent   = `(${s.only_db_count})`;
+
+  // Matched table
+  document.getElementById('tab-matched').innerHTML = buildMatchedTable(data.matched);
+  // Only in statement
+  document.getElementById('tab-only_statement').innerHTML = buildSimpleTable(data.only_statement, 'stmt');
+  // Only in DB
+  document.getElementById('tab-only_db').innerHTML = buildSimpleTable(data.only_db, 'db');
+
+  if (data.parse_errors && data.parse_errors.length) {
+    showBanner('Parsed with warnings: ' + data.parse_errors.join('; '), 'info');
+  }
+  switchTab('matched');
+}
+
+function buildMatchedTable(rows) {
+  if (!rows.length) return '<div class="empty">No matched transactions</div>';
+  let h = `<table class="data-table"><thead><tr>
+    <th>Date</th><th>Statement Description</th><th class="right">Stmt Amt</th>
+    <th>App Name</th><th class="right">App Amt</th><th class="right">Diff</th>
+    </tr></thead><tbody>`;
+  for (const m of rows) {
+    const s = m.statement, d = m.db;
+    const diff = Math.abs(Math.abs(s.amount) - Math.abs(d.amount));
+    const diffCell = diff > 0.005
+      ? `<td class="right diff-amt">$${diff.toFixed(2)}</td>`
+      : `<td class="right" style="color:#aaa">—</td>`;
+    h += `<tr>
+      <td>${fmtDate(s.date)}</td>
+      <td>${escHtml(s.description)}</td>
+      <td class="right">${fmt(s.amount)}</td>
+      <td>${escHtml(d.name)}<div class="subdesc">${escHtml(d.account||'')}</div></td>
+      <td class="right">${fmt(d.amount)}</td>
+      ${diffCell}
+    </tr>`;
+  }
+  return h + '</tbody></table>';
+}
+
+function buildSimpleTable(rows, source) {
+  if (!rows.length) return '<div class="empty">No transactions in this category</div>';
+  const isStmt = source === 'stmt';
+  const headers = isStmt
+    ? '<th>Date</th><th>Description</th><th class="right">Amount</th>'
+    : '<th>Date</th><th>App Name</th><th class="right">Amount</th><th>Account</th>';
+  let h = `<table class="data-table"><thead><tr>${headers}</tr></thead><tbody>`;
+  for (const t of rows) {
+    if (isStmt) {
+      h += `<tr>
+        <td>${fmtDate(t.date)}</td>
+        <td>${escHtml(t.description)}</td>
+        <td class="right">${fmt(t.amount)}</td>
+      </tr>`;
+    } else {
+      h += `<tr>
+        <td>${fmtDate(t.date)}</td>
+        <td>${escHtml(t.name)}</td>
+        <td class="right">${fmt(t.amount)}</td>
+        <td class="subdesc">${escHtml(t.account||'')}</td>
+      </tr>`;
+    }
+  }
+  return h + '</tbody></table>';
+}
+
+async function loadHistory() {
+  try {
+    const data = await fetch('/reports/api/reconcile/history').then(r => r.json());
+    const el = document.getElementById('history-list');
+    if (!data.length) { el.innerHTML = '<div class="empty">No uploads yet</div>'; return; }
+    let h = `<table class="data-table"><thead><tr>
+      <th>Uploaded</th><th>File</th><th>Type</th><th>Institution</th>
+      <th>Date Range</th><th class="right">Rows</th>
+    </tr></thead><tbody>`;
+    for (const r of data) {
+      h += `<tr>
+        <td class="subdesc">${(r.upload_ts||'').slice(0,16)}</td>
+        <td>${escHtml(r.filename)}</td>
+        <td><span class="badge badge-match">${escHtml(r.account_type)}</span></td>
+        <td>${escHtml(r.institution||'—')}</td>
+        <td>${fmtDate(r.date_start)} – ${fmtDate(r.date_end)}</td>
+        <td class="right">${r.tx_count}</td>
+      </tr>`;
+    }
+    el.innerHTML = h + '</tbody></table>';
+  } catch { document.getElementById('history-list').innerHTML = '<div class="empty">Could not load history</div>'; }
+}
+
+loadHistory();
+</script>
+</body>
+</html>

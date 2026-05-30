@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Monthly Cashflow</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
+
+    .topbar {
+      background: #1a1a2e; color: #eee; padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1.5rem;
+    }
+    .topbar h1 { margin: 0; font-size: 1.1rem; color: #fff; }
+    .topbar a  { color: #aad4f5; font-size: .9rem; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+
+    .month-nav {
+      display: flex; align-items: center; gap: .75rem; margin: 1rem 1.5rem;
+    }
+    .month-nav button {
+      padding: .35rem .7rem; background: #0078d7; color: #fff;
+      border: none; border-radius: 6px; cursor: pointer; font-size: .9rem;
+    }
+    .month-nav button:hover { background: #005fa3; }
+    .month-nav strong { font-size: 1.15rem; min-width: 160px; text-align: center; }
+
+    /* ---- layout ---- */
+    .page { padding: 0 1.5rem 2rem; }
+
+    /* Net summary bar */
+    .net-bar {
+      display: flex; gap: 1px; border-radius: 8px; overflow: hidden;
+      margin-bottom: 1rem; font-size: .9rem;
+    }
+    .net-bar .seg {
+      flex: 1; padding: .6rem 1rem; text-align: center;
+    }
+    .seg-in   { background: #d4edda; color: #155724; }
+    .seg-out  { background: #f8d7da; color: #721c24; }
+    .seg-net  { background: #cce5ff; color: #004085; }
+    .seg-cc   { background: #fff3cd; color: #856404; }
+    .seg label { display: block; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+    .seg span  { font-size: 1.1rem; font-weight: 700; }
+    .seg-net span.pos { color: #0a7; }
+    .seg-net span.neg { color: #c33; }
+
+    /* Two-column cash flow */
+    .cf-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;
+    }
+    @media (max-width: 700px) { .cf-grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: #fff; border-radius: 8px;
+      box-shadow: 0 0 4px rgba(0,0,0,.07); overflow: hidden;
+    }
+    .panel-hdr {
+      padding: .5rem .85rem; font-size: .8rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .hdr-in   { background: #d4edda; color: #155724; }
+    .hdr-out  { background: #f8d7da; color: #721c24; }
+    .hdr-cc   { background: #fff3cd; color: #856404; }
+    .hdr-dep  { background: #e8f4f8; color: #0c5460; }
+    .hdr-crd  { background: #f5f0ff; color: #4a235a; }
+
+    /* Account balance cards */
+    .bal-row { display: flex; flex-wrap: wrap; gap: .6rem; padding: .75rem .85rem; }
+    .bal-card {
+      flex: 1 1 160px; min-width: 140px; max-width: 220px;
+      border: 1px solid #e0e0e0; border-radius: 6px; padding: .5rem .7rem;
+      background: #fafafa;
+    }
+    .bal-card .bc-inst  { font-size: .68rem; color: #999; text-transform: uppercase; letter-spacing: .03em; }
+    .bal-card .bc-name  { font-size: .82rem; font-weight: 600; color: #333; margin: .1rem 0; line-height: 1.2; }
+    .bal-card .bc-bal   { font-size: 1.05rem; font-weight: 700; color: #155724; }
+    .bal-card .bc-avail { font-size: .75rem; color: #666; margin-top: .15rem; }
+    .bal-card .bc-util  { font-size: .72rem; color: #856404; margin-top: .1rem; }
+    .bal-updated { padding: .25rem .85rem .5rem; font-size: .72rem; color: #aaa; }
+
+    .cf-section-label {
+      padding: .3rem .85rem; font-size: .72rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em; color: #666;
+      background: #f8f9fa; border-top: 1px solid #eee;
+    }
+    .cf-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: .28rem .85rem; font-size: .85rem; border-top: 1px solid #f0f0f0;
+    }
+    .cf-row:hover { background: #fafafa; }
+    .cf-date { color: #888; font-size: .78rem; margin-right: .4rem; white-space: nowrap; }
+    .cf-amt  { font-weight: 600; white-space: nowrap; }
+    .cf-total {
+      display: flex; justify-content: space-between;
+      padding: .4rem .85rem; font-size: .85rem; font-weight: 700;
+      border-top: 2px solid #dee2e6; background: #f8f9fa;
+    }
+    .cf-empty { padding: .5rem .85rem; font-size: .82rem; color: #aaa; font-style: italic; }
+
+    /* CC spending */
+    .cc-grid {
+      display: grid; grid-template-columns: 1fr 280px; gap: 1rem;
+    }
+    @media (max-width: 900px) { .cc-grid { grid-template-columns: 1fr; } }
+
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    thead th {
+      position: sticky; top: 0; background: #f8f9fa; z-index: 1;
+      padding: .45rem .7rem; text-align: left; font-size: .75rem;
+      text-transform: uppercase; letter-spacing: .04em; color: #666;
+      border-bottom: 2px solid #dee2e6;
+    }
+    thead th.right { text-align: right; }
+    tbody td { padding: .32rem .7rem; border-bottom: 1px solid #f0f0f0; }
+    tbody td.right { text-align: right; font-weight: 600; }
+    tbody tr:hover { background: #fafafa; }
+    tfoot td { padding: .45rem .7rem; font-weight: 700; border-top: 2px solid #dee2e6; background: #f8f9fa; }
+    tfoot td.right { text-align: right; }
+
+    .acct-badge {
+      display: inline-block; font-size: .68rem; padding: .05rem .3rem;
+      border-radius: 3px; background: #e9ecef; color: #555; margin-left: .3rem;
+      vertical-align: middle; white-space: nowrap;
+    }
+
+    /* Category totals */
+    .cat-list { padding: .5rem 0; }
+    .cat-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: .28rem .85rem; font-size: .84rem; border-top: 1px solid #f0f0f0;
+    }
+    .cat-row:hover { background: #fafafa; }
+    .cat-bar-wrap { flex: 1; margin: 0 .75rem; height: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
+    .cat-bar { height: 100%; background: #f0ad4e; border-radius: 3px; }
+    .cat-amt { font-weight: 600; white-space: nowrap; font-size: .84rem; }
+    .cat-total {
+      padding: .4rem .85rem; font-size: .85rem; font-weight: 700;
+      border-top: 2px solid #dee2e6; background: #f8f9fa;
+      display: flex; justify-content: space-between;
+    }
+
+    #loading { text-align: center; padding: 3rem; color: #888; font-size: 1rem; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Monthly Cashflow</h1>
+  <a href="/reports">← Calendar</a>
+  <a href="/">← Home</a>
+</div>
+
+<div class="month-nav">
+  <button onclick="shift(-1)">&#8592; Prev</button>
+  <strong id="month-label"></strong>
+  <button onclick="shift(1)">Next &#8594;</button>
+</div>
+
+<div class="page">
+  <!-- Account balances (always visible) -->
+  <div id="balances-section">
+    <div class="panel" style="margin-bottom:1rem;">
+      <div class="panel-hdr hdr-dep">Checking &amp; Savings Balances</div>
+      <div class="bal-row" id="bal-depository"><span style="color:#aaa;font-size:.85rem;padding:.5rem">Loading…</span></div>
+    </div>
+    <div class="panel" style="margin-bottom:1rem;">
+      <div class="panel-hdr hdr-crd">Credit Card Balances</div>
+      <div class="bal-row" id="bal-credit"><span style="color:#aaa;font-size:.85rem;padding:.5rem">Loading…</span></div>
+      <div class="bal-updated" id="bal-updated"></div>
+    </div>
+  </div>
+
+  <div id="loading">Loading…</div>
+  <div id="content" style="display:none">
+
+    <!-- Net summary bar -->
+    <div class="net-bar">
+      <div class="seg seg-in">
+        <label>Checking In</label><span id="t-in">–</span>
+      </div>
+      <div class="seg seg-out">
+        <label>Checking Out</label><span id="t-out">–</span>
+      </div>
+      <div class="seg seg-net">
+        <label>Net Checking</label><span id="t-net">–</span>
+      </div>
+      <div class="seg seg-cc">
+        <label>CC Spend</label><span id="t-cc">–</span>
+      </div>
+    </div>
+
+    <!-- Checking cash flow -->
+    <div class="cf-grid">
+      <!-- Income in -->
+      <div class="panel">
+        <div class="panel-hdr hdr-in">Money In — Checking</div>
+        <div id="cf-payroll"></div>
+        <div id="cf-income-other"></div>
+        <div class="cf-total">
+          <span>Total In</span><span id="cf-total-in">–</span>
+        </div>
+      </div>
+
+      <!-- Cash out -->
+      <div class="panel">
+        <div class="panel-hdr hdr-out">Money Out — Checking</div>
+        <div id="cf-bills"></div>
+        <div id="cf-transfers"></div>
+        <div id="cf-misc"></div>
+        <div class="cf-total">
+          <span>Total Out</span><span id="cf-total-out">–</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CC spending -->
+    <div class="cc-grid">
+      <div class="panel">
+        <div class="panel-hdr hdr-cc">Credit Card Charges</div>
+        <div style="overflow-x:auto; max-height:520px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Merchant</th>
+                <th>Category</th>
+                <th class="right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="cc-tbody"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3">Total CC Charges</td>
+                <td class="right" id="cc-total">–</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hdr hdr-cc">By Category</div>
+        <div class="cat-list" id="cat-list"></div>
+        <div class="cat-total">
+          <span>Total</span><span id="cat-total">–</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- #content -->
+</div>
+
+<script>
+  const fmt  = n  => '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  const fmtN = n  => (n == null ? '–' : fmt(n));
+
+  async function loadBalances() {
+    const data = await fetch('/reports/api/account_balances').then(r => r.json()).catch(() => []);
+    const dep = data.filter(a => a.type === 'depository');
+    const crd = data.filter(a => a.type === 'credit');
+    const updDates = data.map(a => a.updated_at).filter(Boolean).sort().reverse();
+    if (updDates.length) {
+      document.getElementById('bal-updated').textContent = 'Balances as of ' + updDates[0];
+    }
+
+    document.getElementById('bal-depository').innerHTML = dep.map(a => {
+      const avail = a.available != null ? `<div class="bc-avail">Available: ${fmt(a.available)}</div>` : '';
+      return `<div class="bal-card">
+        <div class="bc-inst">${a.institution}</div>
+        <div class="bc-name">${a.name}</div>
+        <div class="bc-bal">${fmtN(a.current)}</div>
+        ${avail}
+      </div>`;
+    }).join('') || '<span style="color:#aaa;font-size:.85rem;padding:.5rem">No accounts</span>';
+
+    document.getElementById('bal-credit').innerHTML = crd.map(a => {
+      const bal   = a.current  != null ? a.current  : 0;
+      const lim   = a.limit    != null ? a.limit    : null;
+      const avail = a.available != null ? a.available : null;
+      const util  = lim ? `<div class="bc-util">${((bal/lim)*100).toFixed(0)}% utilization</div>` : '';
+      const availStr = avail != null ? `<div class="bc-avail">Available: ${fmt(avail)}</div>` : (lim ? `<div class="bc-avail">Limit: ${fmt(lim)}</div>` : '');
+      const balColor = bal > 0 ? 'color:#721c24' : 'color:#155724';
+      return `<div class="bal-card">
+        <div class="bc-inst">${a.institution}</div>
+        <div class="bc-name">${a.name}</div>
+        <div class="bc-bal" style="${balColor}">${fmt(bal)}</div>
+        ${availStr}${util}
+      </div>`;
+    }).join('') || '<span style="color:#aaa;font-size:.85rem;padding:.5rem">No credit accounts</span>';
+  }
+
+  loadBalances();
+  const fmtDate = s => { const [,m,d] = s.split('-'); return `${+m}/${+d}`; };
+
+  let curYear  = new Date().getFullYear();
+  let curMonth = new Date().getMonth() + 1;
+
+  function monthStr() {
+    return `${curYear}-${String(curMonth).padStart(2,'0')}`;
+  }
+  function monthLabel() {
+    return new Date(curYear, curMonth-1, 1)
+      .toLocaleString('default', {month:'long', year:'numeric'});
+  }
+
+  function shift(dir) {
+    curMonth += dir;
+    if (curMonth > 12) { curMonth = 1;  curYear++; }
+    if (curMonth < 1)  { curMonth = 12; curYear--; }
+    load();
+  }
+
+  function cfRows(items) {
+    if (!items.length) return '<div class="cf-empty">None</div>';
+    return items.map(e =>
+      `<div class="cf-row">
+        <span><span class="cf-date">${fmtDate(e.date)}</span>${e.label}</span>
+        <span class="cf-amt">${fmt(e.amount)}</span>
+      </div>`
+    ).join('');
+  }
+
+  function renderSection(containerId, sectionLabel, items) {
+    const el = document.getElementById(containerId);
+    el.innerHTML = `<div class="cf-section-label">${sectionLabel}</div>` + cfRows(items);
+  }
+
+  async function load() {
+    document.getElementById('loading').style.display = '';
+    document.getElementById('content').style.display = 'none';
+    document.getElementById('month-label').textContent = monthLabel();
+
+    const data = await fetch('/reports/api/monthly_cashflow?month=' + monthStr())
+      .then(r => r.json()).catch(() => null);
+    if (!data) {
+      document.getElementById('loading').textContent = 'Error loading data.';
+      return;
+    }
+
+    const { checking: chk, cc_transactions: cc, category_totals: cats, totals: t } = data;
+
+    // Net bar
+    document.getElementById('t-in').textContent  = fmt(t.income);
+    document.getElementById('t-out').textContent = fmt(t.total_out);
+    const netEl = document.getElementById('t-net');
+    netEl.innerHTML = `<span class="${t.net >= 0 ? 'pos' : 'neg'}">${t.net >= 0 ? '+' : ''}${fmt(t.net)}</span>`;
+    document.getElementById('t-cc').textContent  = fmt(t.cc_spend);
+
+    // Checking in
+    renderSection('cf-payroll',      'Payroll',       chk.payroll);
+    renderSection('cf-income-other', 'Other Deposits',chk.income_other);
+    document.getElementById('cf-total-in').textContent = fmt(t.income);
+
+    // Checking out
+    renderSection('cf-bills',     'Bills',     chk.bills);
+    renderSection('cf-transfers', 'Transfers', chk.transfers);
+    renderSection('cf-misc',      'Other',     chk.misc_out);
+    document.getElementById('cf-total-out').textContent = fmt(t.total_out);
+
+    // CC table
+    const tbody = document.getElementById('cc-tbody');
+    tbody.innerHTML = cc.map(r =>
+      `<tr>
+        <td>${fmtDate(r.date)}</td>
+        <td>${r.merchant}<span class="acct-badge">${r.account}</span></td>
+        <td>${r.category}${r.subcategory ? ' · ' + r.subcategory : ''}</td>
+        <td class="right">${fmt(r.amount)}</td>
+      </tr>`
+    ).join('') || '<tr><td colspan="4" style="color:#aaa;font-style:italic;padding:.5rem .7rem">No charges this month</td></tr>';
+    document.getElementById('cc-total').textContent = fmt(t.cc_spend);
+
+    // Category totals
+    const maxAmt = Math.max(...Object.values(cats), 1);
+    const catEl = document.getElementById('cat-list');
+    catEl.innerHTML = Object.entries(cats).map(([cat, amt]) =>
+      `<div class="cat-row">
+        <span style="min-width:120px">${cat}</span>
+        <div class="cat-bar-wrap"><div class="cat-bar" style="width:${(amt/maxAmt*100).toFixed(1)}%"></div></div>
+        <span class="cat-amt">${fmt(amt)}</span>
+      </div>`
+    ).join('') || '<div class="cf-empty">No data</div>';
+    document.getElementById('cat-total').textContent = fmt(t.cc_spend);
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = '';
+  }
+
+  load();
+</script>
+</body>
+</html>

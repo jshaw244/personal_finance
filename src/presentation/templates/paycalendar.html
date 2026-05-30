@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pay-Period Calendar</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
+
+    .topbar {
+      background: #1a1a2e; color: #eee; padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
+    }
+    .topbar h1 { margin: 0; font-size: 1.1rem; color: #fff; }
+    .topbar a  { color: #aad4f5; font-size: .9rem; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+
+    .controls {
+      display: flex; align-items: center; gap: 1rem; padding: .75rem 1.5rem;
+      background: #fff; border-bottom: 1px solid #dde; flex-wrap: wrap;
+    }
+    .month-nav { display: flex; align-items: center; gap: .5rem; }
+    .month-nav button {
+      padding: .3rem .65rem; background: #0078d7; color: #fff;
+      border: none; border-radius: 5px; cursor: pointer; font-size: .9rem;
+    }
+    .month-nav button:hover { background: #005fa3; }
+    .month-nav strong { font-size: 1.05rem; min-width: 120px; text-align: center; }
+
+    .tab-group { display: flex; gap: 0; border-radius: 6px; overflow: hidden; border: 1px solid #ccc; }
+    .tab-group button {
+      padding: .35rem .9rem; border: none; cursor: pointer; font-size: .85rem;
+      background: #f5f5f5; color: #555; transition: background .15s;
+    }
+    .tab-group button.active { background: #0078d7; color: #fff; font-weight: 600; }
+    .tab-group button:first-child { border-right: 1px solid #ccc; }
+
+    /* Checking balance bar */
+    .bal-bar {
+      background: #fff; border-bottom: 1px solid #dde;
+      padding: .6rem 1.5rem; display: flex; align-items: center;
+      gap: 1.5rem; flex-wrap: wrap;
+    }
+    .bal-bar-label {
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .05em; color: #666; white-space: nowrap;
+    }
+    .bal-cards { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .bal-card {
+      border: 1px solid #d8e8d8; border-radius: 7px;
+      padding: .45rem .8rem; background: #f4fcf6; min-width: 150px;
+    }
+    .bc-name  { font-size: .8rem; font-weight: 600; color: #333; }
+    .bc-bal   { font-size: 1.1rem; font-weight: 700; color: #155724; font-variant-numeric: tabular-nums; }
+    .bc-avail { font-size: .72rem; color: #6c757d; margin-top: .1rem; }
+    .bal-updated { font-size: .7rem; color: #aaa; margin-left: auto; white-space: nowrap; }
+
+    /* Table wrapper */
+    .table-wrap { padding: 1rem 1.5rem 2rem; overflow-x: auto; }
+
+    table { border-collapse: collapse; min-width: 100%; font-size: .88rem; }
+    th, td { border: 1px solid #d0d4da; padding: .35rem .65rem; white-space: nowrap; }
+    th {
+      background: #1a1a2e; color: #eee; text-align: center;
+      font-size: .8rem; letter-spacing: .03em;
+    }
+    th.col-date { background: #24243e; min-width: 90px; text-align: left; }
+    th.col-active { background: #0a5c9e; }
+
+    td.col-date { font-size: .8rem; color: #555; background: #f8f8fb; font-variant-numeric: tabular-nums; }
+
+    td.amount {
+      text-align: right; font-variant-numeric: tabular-nums;
+      font-family: 'Courier New', monospace; font-size: .85rem;
+    }
+    td.amount.has-value { background: #fff; cursor: pointer; }
+    td.amount.has-value:hover { background: #e8f0fe; }
+    td.amount.empty { background: #f5f6f8; color: #bbb; }
+
+    /* Active period column tint */
+    td.col-active { background: #f0f6ff !important; }
+    td.col-active.has-value { background: #e0edff !important; }
+    td.col-active.has-value:hover { background: #cce0ff !important; }
+
+    /* Special rows */
+    tr.row-income td { background: #e8f7ee; font-weight: 600; }
+    tr.row-income td.col-active { background: #d0f0de !important; }
+    tr.row-income td.amount { color: #0a5c2e; }
+    tr.row-total td { background: #e8eef8; font-weight: 700; border-top: 2px solid #9ab; }
+    tr.row-total td.col-active { background: #d5e5f8 !important; }
+    tr.row-total td.amount { color: #1a3a6e; }
+    tr.row-delta td { background: #f0f0f0; font-weight: 700; border-top: 1px solid #bbb; }
+    tr.row-delta td.col-active { background: #e5e5e5 !important; }
+    tr.row-delta td.amount.pos { color: #0a7; }
+    tr.row-delta td.amount.neg { color: #c33; }
+
+    /* Detail popup */
+    .detail-popup {
+      position: fixed; z-index: 999;
+      background: #fff; border: 1px solid #aaa; border-radius: 8px;
+      padding: .75rem 1rem; box-shadow: 0 4px 16px rgba(0,0,0,.18);
+      min-width: 220px; max-width: 340px; font-size: .82rem; display: none;
+    }
+    .detail-popup h4 { margin: 0 0 .4rem; font-size: .85rem; color: #333; }
+    .detail-popup table { border: none; font-size: .8rem; width: 100%; }
+    .detail-popup table td { border: none; padding: .15rem .25rem; }
+    .detail-popup table td:last-child { text-align: right; font-family: monospace; }
+    .detail-popup .dp-name { color: #444; }
+    .detail-popup .dp-amt  { color: #1a3a6e; }
+    .detail-popup .close-btn { float: right; cursor: pointer; color: #888; font-size: 1rem; margin-top: -2px; }
+
+    .loading { padding: 2rem; text-align: center; color: #888; font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Pay-Period Calendar</h1>
+  <a href="/reports">← Reports</a>
+  <a href="/reports/monthly">Monthly Cashflow</a>
+</div>
+
+<div class="controls">
+  <div class="month-nav">
+    <button onclick="shiftMonth(-1)">&#8592;</button>
+    <strong id="month-label">—</strong>
+    <button onclick="shiftMonth(1)">&#8594;</button>
+  </div>
+  <div class="tab-group">
+    <button id="tab-cash" class="active" onclick="setView('cash')">Cash (Checking/Savings)</button>
+    <button id="tab-cc"   onclick="setView('cc')">Credit Cards</button>
+  </div>
+</div>
+
+<!-- Checking account balances -->
+<div class="bal-bar">
+  <div class="bal-bar-label">Checking Balance</div>
+  <div class="bal-cards" id="bal-cards"><span style="color:#aaa;font-size:.85rem">Loading…</span></div>
+  <span class="bal-updated" id="bal-updated"></span>
+</div>
+
+<div class="table-wrap">
+  <div id="table-container" class="loading">Loading…</div>
+</div>
+
+<div class="detail-popup" id="detail-popup">
+  <span class="close-btn" onclick="closePopup()">&#x2715;</span>
+  <h4 id="dp-title"></h4>
+  <table id="dp-table"></table>
+</div>
+
+<script>
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+
+let calYear  = new Date().getFullYear();
+let calMonth = new Date().getMonth() + 1;
+let view     = 'cash';
+let lastData = null;
+
+const todayStr = new Date().toISOString().slice(0,10);
+
+function fmt(n) {
+  if (!n && n !== 0) return '';
+  return '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtAmt(n) {
+  if (n === null || n === undefined || n === 0) return '';
+  return '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtSigned(n) {
+  if (n === null || n === undefined) return '';
+  const s = '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return n < 0 ? '-' + s : s;
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Load checking account balances (runs once, independent of month)
+async function loadBalances() {
+  try {
+    const data = await fetch('/reports/api/account_balances').then(r => r.json());
+    const checking = data.filter(a => a.subtype === 'checking');
+    const updDates = checking.map(a => a.updated_at).filter(Boolean).sort().reverse();
+    if (updDates.length) {
+      document.getElementById('bal-updated').textContent = 'as of ' + updDates[0];
+    }
+    document.getElementById('bal-cards').innerHTML = checking.map(a => {
+      const avail = a.available != null
+        ? `<div class="bc-avail">Available: ${fmt(a.available)}</div>` : '';
+      return `<div class="bal-card">
+        <div class="bc-name">${escHtml(a.institution)} — ${escHtml(a.name)}</div>
+        <div class="bc-bal">${fmt(a.current)}</div>
+        ${avail}
+      </div>`;
+    }).join('') || '<span style="color:#aaa;font-size:.85rem">No checking accounts found</span>';
+  } catch {
+    document.getElementById('bal-cards').innerHTML = '<span style="color:#c33;font-size:.85rem">Could not load balances</span>';
+  }
+}
+
+function setView(v) {
+  view = v;
+  document.getElementById('tab-cash').classList.toggle('active', v === 'cash');
+  document.getElementById('tab-cc').classList.toggle('active', v === 'cc');
+  if (lastData) renderTable(lastData);
+}
+
+function shiftMonth(delta) {
+  calMonth += delta;
+  if (calMonth > 12) { calMonth = 1;  calYear++; }
+  if (calMonth < 1)  { calMonth = 12; calYear--; }
+  load();
+}
+
+function load() {
+  const monthStr = `${calYear}-${String(calMonth).padStart(2,'0')}`;
+  document.getElementById('month-label').textContent = `${MONTHS[calMonth-1]} ${calYear}`;
+  document.getElementById('table-container').innerHTML = '<div class="loading">Loading…</div>';
+
+  fetch(`/reports/api/pay_calendar?month=${monthStr}`)
+    .then(r => r.json())
+    .then(data => { lastData = data; renderTable(data); })
+    .catch(() => {
+      document.getElementById('table-container').innerHTML =
+        '<div class="loading" style="color:#c33">Error loading data</div>';
+    });
+}
+
+function renderTable(data) {
+  const periods  = data.periods;
+  const cashDays = data.cash_days  || {};
+  const ccDays   = data.cc_days    || {};
+  const pfDate   = data.period_for_date || {};
+  const isCash   = (view === 'cash');
+
+  // Which period contains today (for highlighting)?
+  const activePeriodIdx = pfDate[todayStr] ?? -1;
+
+  const [yr, mn] = data.month.split('-').map(Number);
+  const daysInMonth = new Date(yr, mn, 0).getDate();
+  const allDates = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    allDates.push(`${yr}-${String(mn).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  }
+
+  const nPeriods = periods.length;
+
+  function activeCls(pi) { return pi === activePeriodIdx ? ' col-active' : ''; }
+
+  let html = '<table>';
+
+  // Header row
+  html += '<tr><th class="col-date">Date</th>';
+  for (let pi = 0; pi < nPeriods; pi++) {
+    const ac = activePeriodIdx === pi ? ' col-active' : '';
+    html += `<th class="${ac}">${escHtml(periods[pi].label)}</th>`;
+  }
+  html += '</tr>';
+
+  // Prorated Income row (cash view only)
+  if (isCash) {
+    html += '<tr class="row-income"><td class="col-date">Income (prorated)</td>';
+    for (let pi = 0; pi < nPeriods; pi++) {
+      const p   = periods[pi];
+      const v   = p.prorated_income || 0;
+      const pct = p.proration_factor != null ? Math.round(p.proration_factor * 100) : 100;
+      const ac  = activeCls(pi);
+      const tip = pct < 100
+        ? ` title="${pct}% of $${(p.paycheck_amount||0).toFixed(2)} paycheck (${pct}/100 days in month)"`
+        : '';
+      html += `<td class="amount${v ? ' has-value' : ' empty'}${ac}"${tip}>${v ? fmtAmt(v) : ''}</td>`;
+    }
+    html += '</tr>';
+  }
+
+  // Date rows
+  for (const dStr of allDates) {
+    const dayNum = parseInt(dStr.slice(8), 10);
+    const dow = new Date(dStr + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short'});
+    const isToday = dStr === todayStr;
+    const label = `${mn}/${dayNum}  ${dow}${isToday ? ' ◀' : ''}`;
+
+    const periodIdx = pfDate[dStr] ?? -1;
+    const dayDataCash = cashDays[dStr];
+    const dayDataCC   = ccDays[dStr];
+    const cashVal = dayDataCash ? dayDataCash.out : 0;
+    const ccVal   = dayDataCC  ? dayDataCC.total  : 0;
+
+    const todayCls = isToday ? ' style="font-weight:700;color:#333"' : '';
+    html += `<tr><td class="col-date"${todayCls}>${label}</td>`;
+    for (let pi = 0; pi < nPeriods; pi++) {
+      const ac = activeCls(pi);
+      if (pi === periodIdx) {
+        const v = isCash ? cashVal : ccVal;
+        if (v > 0) {
+          html += `<td class="amount has-value${ac}" onclick="showDetail('${dStr}','${isCash?'cash':'cc'}',this)">${fmtAmt(v)}</td>`;
+        } else {
+          html += `<td class="amount empty${ac}"></td>`;
+        }
+      } else {
+        html += `<td class="amount empty${ac}"></td>`;
+      }
+    }
+    html += '</tr>';
+  }
+
+  // Total row
+  html += '<tr class="row-total"><td class="col-date">Total</td>';
+  for (let pi = 0; pi < nPeriods; pi++) {
+    const v = isCash ? (periods[pi].cash_out || 0) : (periods[pi].cc_total || 0);
+    html += `<td class="amount${activeCls(pi)}">${fmtAmt(v)}</td>`;
+  }
+  html += '</tr>';
+
+  // Remaining row (cash only: prorated income − cash out)
+  if (isCash) {
+    html += '<tr class="row-delta"><td class="col-date">Remaining</td>';
+    for (let pi = 0; pi < nPeriods; pi++) {
+      const delta = (periods[pi].prorated_income || 0) - (periods[pi].cash_out || 0);
+      const cls = delta >= 0 ? 'pos' : 'neg';
+      html += `<td class="amount ${cls}${activeCls(pi)}">${fmtSigned(delta)}</td>`;
+    }
+    html += '</tr>';
+  }
+
+  html += '</table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+// Detail popup
+function showDetail(dStr, viewType, cell) {
+  const isCash = viewType === 'cash';
+  const popup  = document.getElementById('detail-popup');
+  let txs = [], totalIn = 0;
+  if (isCash) {
+    const dd = (lastData.cash_days || {})[dStr] || {};
+    txs = dd.txs_out || [];
+    totalIn = dd.in || 0;
+  } else {
+    const dd = (lastData.cc_days || {})[dStr] || {};
+    txs = dd.txs || [];
+  }
+  const [yr, mn, dy] = dStr.split('-').map(Number);
+  document.getElementById('dp-title').textContent =
+    `${mn}/${dy}/${yr}` + (isCash && totalIn ? `  (+$${totalIn.toFixed(2)} in)` : '');
+
+  let rows = '';
+  for (const tx of txs) {
+    const acct = tx.account ? ` <span style="color:#aaa;font-size:.75rem">${escHtml(tx.account)}</span>` : '';
+    const cat  = tx.category ? ` <span style="color:#888;font-size:.75rem">[${escHtml(tx.category)}]</span>` : '';
+    rows += `<tr><td class="dp-name">${escHtml(tx.name)}${acct}${cat}</td>
+                 <td class="dp-amt">$${tx.amount.toFixed(2)}</td></tr>`;
+  }
+  document.getElementById('dp-table').innerHTML =
+    rows || '<tr><td colspan="2" style="color:#888">No transactions</td></tr>';
+
+  const rect = cell.getBoundingClientRect();
+  popup.style.top  = (rect.bottom + window.scrollY + 6) + 'px';
+  popup.style.left = Math.min(rect.left + window.scrollX, window.innerWidth - 360) + 'px';
+  popup.style.display = 'block';
+}
+
+function closePopup() { document.getElementById('detail-popup').style.display = 'none'; }
+document.addEventListener('click', e => {
+  if (!e.target.closest('.detail-popup') && !e.target.classList.contains('has-value')) closePopup();
+});
+
+loadBalances();
+load();
+</script>
+</body>
+</html>

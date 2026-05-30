@@ -216,10 +216,10 @@ if (Test-Path $schemaFile) {
 # -------------------------------------------------------------------
 # Launch schema watcher
 # -------------------------------------------------------------------
+$watcherProc = $null
 if (Test-Path $WatcherScript) {
     Write-Host "Launching schema watcher..."
-    #Start-Process pwsh -ArgumentList "-NoExit", "-File", "`"$WatcherScript`""
-    Start-Process pwsh -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$WatcherScript`""
+    $watcherProc = Start-Process pwsh -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$WatcherScript`"" -PassThru
 } else {
     Write-Host "Warning: Schema watcher not found at $WatcherScript" -ForegroundColor Yellow
 }
@@ -238,7 +238,7 @@ elseif (Get-Command ngrok -ErrorAction SilentlyContinue) {
     $ng = Get-Process ngrok -ErrorAction SilentlyContinue
     if ($ng) { $ng | Stop-Process -Force }
     Write-Host "Starting ngrok tunnel (port $port)..."
-    Start-Process pwsh -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot'; ngrok http $port"
+    $ngrokProc = Start-Process pwsh -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot'; ngrok http $port" -PassThru
     Start-Sleep -Seconds 4
     try {
         $resp = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -UseBasicParsing
@@ -284,7 +284,7 @@ $flaskArgs = if ($FlaskDebug) {
 } else {
   @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $flaskCmd)
 }
-Start-Process pwsh -ArgumentList $flaskArgs
+$flaskProc = Start-Process pwsh -ArgumentList $flaskArgs -PassThru
 
 Start-Sleep -Seconds 3
 
@@ -308,8 +308,7 @@ python -m src.ingestion.debug_db schema
 python -m src.ingestion.debug_db logs 20
 "@ | Out-File -FilePath $debugScript -Encoding UTF8 -Force
 
-#Start-Process pwsh -ArgumentList "-NoExit", "-File", "`"$debugScript`""
-Start-Process pwsh -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$debugScript`""
+$debugProc = Start-Process pwsh -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$debugScript`"" -PassThru
 
 
 # -------------------------------------------------------------------
@@ -330,4 +329,47 @@ if ($IncludeAnalysis) {
 }
 
 Write-Host "`n=== $Target environment startup complete ===" -ForegroundColor Cyan
-Write-Host "Close Flask/Watcher windows manually when finished (auto-cleanup handled on next run)." -ForegroundColor DarkGray
+Write-Host "Press Enter (or Ctrl+C) in this window to stop all services and close windows.`n" -ForegroundColor Yellow
+
+# Collect PIDs from PassThru handles (may be null if process wasn't started)
+$trackedPids = @($watcherProc, $ngrokProc, $flaskProc, $debugProc) |
+    Where-Object { $_ -ne $null } |
+    ForEach-Object { $_.Id }
+
+try {
+    $null = Read-Host
+} finally {
+    Write-Host "`nShutting down..." -ForegroundColor Cyan
+
+    # 1. Kill Flask python process by port (most direct)
+    $portPids = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($procId in $portPids) {
+        Write-Host "  Stopping Flask process (PID $procId on port $port)"
+        & taskkill /PID $procId /F 2>&1 | Out-Null
+    }
+
+    # 2. Kill ngrok by process name
+    Get-Process ngrok -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "  Stopping ngrok (PID $($_.Id))"
+        & taskkill /PID $_.Id /F 2>&1 | Out-Null
+    }
+
+    # 3. Kill tracked pwsh windows and their child trees via taskkill /T
+    foreach ($procId in $trackedPids) {
+        if (Get-Process -Id $procId -ErrorAction SilentlyContinue) {
+            Write-Host "  Closing window (PID $procId)"
+            & taskkill /PID $procId /F /T 2>&1 | Out-Null
+        }
+    }
+
+    # 4. Catch any remaining project-related pwsh windows by title
+    Get-Process pwsh, powershell -ErrorAction SilentlyContinue |
+        Where-Object { $_.MainWindowTitle -like "*personal_finance*" } |
+        ForEach-Object {
+            Write-Host "  Closing titled window: $($_.MainWindowTitle) (PID $($_.Id))"
+            & taskkill /PID $_.Id /F /T 2>&1 | Out-Null
+        }
+
+    Write-Host "`n=== All services stopped. Close this window manually. ===" -ForegroundColor Green
+}

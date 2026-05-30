@@ -1223,7 +1223,6 @@ def index():
     <div id="status"></div>
     <pre id="out"></pre>
 
-    <p><a href="/reports">→ View Latest Analysis Reports</a></p>
     <p><a href="/reports/login">→ Reports Login</a></p>
 
 <script>

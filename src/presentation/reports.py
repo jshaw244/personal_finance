@@ -1256,6 +1256,453 @@ def api_calendar_events():
     return jsonify(events)
 
 
+# ---------------------------------------------------------------------------
+# Pay-period calendar helpers + routes
+# ---------------------------------------------------------------------------
+
+def _calc_pay_periods(year, month, anchor_str, cadence_days):
+    """Return list of pay-period column dicts covering the given month.
+
+    Each dict includes:
+      label, start, end (ISO strings), is_tail,
+      income_payday  – the payday whose check FUNDS this column (may be before month_start),
+      proration_factor – fraction of the full pay period that falls in this month.
+    """
+    import calendar as _cal, math as _math
+    if not anchor_str:
+        return []
+    anchor = date.fromisoformat(anchor_str)
+    _, days_in_month = _cal.monthrange(year, month)
+    month_start = date(year, month, 1)
+    month_end   = date(year, month, days_in_month)
+
+    # prev_payday: last payday on or before month_start
+    diff = (month_start - anchor).days
+    prev_payday = anchor + timedelta(days=_math.floor(diff / cadence_days) * cadence_days)
+
+    # collect all paydays that fall within the month
+    month_paydays = []
+    p = prev_payday
+    while p <= month_end:
+        if p >= month_start:
+            month_paydays.append(p)
+        p += timedelta(days=cadence_days)
+
+    periods = []
+    if not month_paydays:
+        # Entire month falls inside one pay period — proration = days_in_month / cadence
+        periods.append({
+            "label": f"{month_start.month}/{month_start.day}/{month_start.year}",
+            "start": month_start.isoformat(), "end": month_end.isoformat(),
+            "income_payday": prev_payday.isoformat(),
+            "proration_factor": round(days_in_month / cadence_days, 6),
+            "is_tail": True,
+        })
+        return periods
+
+    # First column: month_start → first payday in month, funded by prev_payday.
+    # If all cadence_days fall within the month this is a full period and gets a
+    # normal start-date label.  Only use the "< X" label when the period actually
+    # began before month_start (i.e. it is genuinely partial).
+    fp = month_paydays[0]
+    tail_days = (fp - month_start).days + 1
+    next_start = fp + timedelta(days=1)
+    is_partial_tail = tail_days < cadence_days
+    label = (f"< {next_start.month}/{next_start.day}"
+             if is_partial_tail
+             else f"{month_start.month}/{month_start.day}/{month_start.year}")
+    periods.append({
+        "label": label,
+        "start": month_start.isoformat(), "end": fp.isoformat(),
+        "income_payday": prev_payday.isoformat(),
+        "proration_factor": round(tail_days / cadence_days, 6),
+        "is_tail": is_partial_tail,
+    })
+
+    # One column per payday in month: (payday+1) → next payday (or month_end)
+    # Each column is funded by the payday at its START (pd).
+    for i, pd in enumerate(month_paydays):
+        col_start = pd + timedelta(days=1)
+        col_end   = month_paydays[i + 1] if i + 1 < len(month_paydays) else month_end
+        vis_s = max(col_start, month_start)
+        vis_e = min(col_end, month_end)
+        if vis_s <= vis_e:
+            vis_days = (vis_e - vis_s).days + 1
+            periods.append({
+                "label": f"{col_start.month}/{col_start.day}/{col_start.year}",
+                "start": vis_s.isoformat(), "end": vis_e.isoformat(),
+                "income_payday": pd.isoformat(),  # paycheck received on this date
+                "proration_factor": round(vis_days / cadence_days, 6),
+                "is_tail": False,
+            })
+    return periods
+
+
+@reports_bp.route("/paycalendar")
+@login_required
+def paycalendar():
+    return render_template("paycalendar.html")
+
+
+@reports_bp.route("/api/pay_calendar")
+@login_required
+def api_pay_calendar():
+    from src.common.paths import PROJECT_ROOT
+    import calendar as _cal
+
+    month_param = (request.args.get("month") or "").strip()
+    if not month_param:
+        month_param = date.today().strftime("%Y-%m")
+    try:
+        yr, mn = int(month_param[:4]), int(month_param[5:7])
+    except Exception:
+        return jsonify({"error": "invalid month"}), 400
+
+    _, days_in_month = _cal.monthrange(yr, mn)
+    month_start = date(yr, mn, 1)
+    month_end   = date(yr, mn, days_in_month)
+
+    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+    with open(sched_path, encoding="utf-8") as f:
+        sched = json.load(f)
+
+    payday_cfg = sched.get("payday", {})
+    periods = _calc_pay_periods(
+        yr, mn,
+        payday_cfg.get("anchor_date", ""),
+        int(payday_cfg.get("cadence_days", 14)),
+    )
+
+    # date-string → period index lookup
+    period_for_date = {}
+    for idx, p in enumerate(periods):
+        d = date.fromisoformat(p["start"])
+        end_d = date.fromisoformat(p["end"])
+        while d <= end_d:
+            period_for_date[d.isoformat()] = idx
+            d += timedelta(days=1)
+
+    cadence_days = int(payday_cfg.get("cadence_days", 14))
+
+    # Extend query window to find paychecks that fund the tail (may land before month_start)
+    query_start = (month_start - timedelta(days=cadence_days)).isoformat()
+    query_end   = month_end.isoformat()
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+
+    cash_days = {}   # date -> {out, in, txs_out, txs_in}
+    cc_days   = {}   # date -> {total, txs}
+    # paycheck_by_date: date -> total payroll deposit (Employer, name match)
+    paycheck_by_date: dict[str, float] = {}
+
+    try:
+        # Depository transactions (extended range to capture tail-funding paycheck)
+        for row in conn.execute("""
+            SELECT t.date, t.name, t.merchant_name, t.amount
+            FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+            WHERE a.type = 'depository'
+              AND t.date >= ? AND t.date <= ?
+              AND IFNULL(t.pending, 0) = 0
+            ORDER BY t.date ASC
+        """, (query_start, query_end)).fetchall():
+            d   = row["date"]
+            amt = float(row["amount"])
+            nm  = (row["merchant_name"] or row["name"] or "")[:50]
+
+            # Track payroll deposits regardless of month boundary
+            if amt < 0 and "EMPLOYER" in (row["name"] or "").upper():
+                paycheck_by_date[d] = paycheck_by_date.get(d, 0.0) + abs(amt)
+
+            # Only add to cash_days for dates within the actual month
+            if d < month_start.isoformat():
+                continue
+            if d not in cash_days:
+                cash_days[d] = {"out": 0.0, "in": 0.0, "txs_out": [], "txs_in": []}
+            if amt > 0:
+                cash_days[d]["out"] = round(cash_days[d]["out"] + amt, 2)
+                cash_days[d]["txs_out"].append({"name": nm, "amount": amt})
+            else:
+                cash_days[d]["in"] = round(cash_days[d]["in"] + abs(amt), 2)
+                cash_days[d]["txs_in"].append({"name": nm, "amount": abs(amt)})
+
+        # Credit card charges (positive = purchase)
+        for row in conn.execute("""
+            SELECT t.date, t.name, t.merchant_name, t.amount,
+                   a.name AS acct_name, tc.user_category
+            FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            WHERE a.type = 'credit'
+              AND t.amount > 0
+              AND t.date >= ? AND t.date <= ?
+              AND IFNULL(t.pending, 0) = 0
+            ORDER BY t.date ASC
+        """, (month_start.isoformat(), query_end)).fetchall():
+            d   = row["date"]
+            amt = float(row["amount"])
+            nm  = (row["merchant_name"] or row["name"] or "")[:50]
+            if d not in cc_days:
+                cc_days[d] = {"total": 0.0, "txs": []}
+            cc_days[d]["total"] = round(cc_days[d]["total"] + amt, 2)
+            cc_days[d]["txs"].append({
+                "name": nm, "amount": amt,
+                "account": row["acct_name"],
+                "category": row["user_category"] or "",
+            })
+    finally:
+        conn.close()
+
+    # Fallback paycheck amount: most recent known paycheck
+    recent_paycheck = max(paycheck_by_date.values(), default=0.0)
+
+    def _find_paycheck(income_payday_str: str) -> float:
+        """Find paycheck deposited on or within ±2 days of the given date."""
+        if not income_payday_str:
+            return recent_paycheck
+        pd = date.fromisoformat(income_payday_str)
+        for delta in (0, -1, 1, -2, 2):
+            d_str = (pd + timedelta(days=delta)).isoformat()
+            if d_str in paycheck_by_date:
+                return paycheck_by_date[d_str]
+        return recent_paycheck  # fallback to most recent known amount
+
+    # Period-level aggregates
+    p_cash_out = [0.0] * len(periods)
+    p_cash_in  = [0.0] * len(periods)
+    p_cc       = [0.0] * len(periods)
+    for d_str, dd in cash_days.items():
+        idx = period_for_date.get(d_str)
+        if idx is not None:
+            p_cash_out[idx] = round(p_cash_out[idx] + dd["out"], 2)
+            p_cash_in[idx]  = round(p_cash_in[idx]  + dd["in"],  2)
+    for d_str, dd in cc_days.items():
+        idx = period_for_date.get(d_str)
+        if idx is not None:
+            p_cc[idx] = round(p_cc[idx] + dd["total"], 2)
+
+    for i, p in enumerate(periods):
+        p["cash_out"] = p_cash_out[i]
+        p["cash_in"]  = p_cash_in[i]
+        p["cc_total"] = p_cc[i]
+        # Prorated income: paycheck for this period × fraction of period in this month
+        paycheck_amt = _find_paycheck(p.get("income_payday"))
+        factor       = p.get("proration_factor", 1.0)
+        p["prorated_income"] = round(paycheck_amt * factor, 2)
+        p["paycheck_amount"] = round(paycheck_amt, 2)
+
+    return jsonify({
+        "month":           month_param,
+        "periods":         periods,
+        "cash_days":       cash_days,
+        "cc_days":         cc_days,
+        "period_for_date": period_for_date,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Monthly cashflow view
+# ---------------------------------------------------------------------------
+
+@reports_bp.route("/monthly")
+@login_required
+def monthly():
+    return render_template("monthly.html")
+
+
+@reports_bp.route("/api/account_balances")
+@login_required
+def api_account_balances():
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT a.name, a.type, a.subtype,
+                   a.current, a.available, a.balance_limit, a.updated_at,
+                   i.institution_name
+            FROM accounts a
+            JOIN items i ON i.item_id = a.item_id
+            WHERE a.type IN ('depository', 'credit')
+            ORDER BY a.type DESC, a.subtype, a.name
+        """).fetchall()
+    finally:
+        conn.close()
+
+    accounts = []
+    for r in rows:
+        accounts.append({
+            "name":         r["name"],
+            "institution":  r["institution_name"],
+            "type":         r["type"],
+            "subtype":      r["subtype"],
+            "current":      float(r["current"]) if r["current"] is not None else None,
+            "available":    float(r["available"]) if r["available"] is not None else None,
+            "limit":        float(r["balance_limit"]) if r["balance_limit"] is not None else None,
+            "updated_at":   (r["updated_at"] or "")[:10],
+        })
+    return jsonify(accounts)
+
+
+@reports_bp.route("/api/monthly_cashflow")
+@login_required
+def api_monthly_cashflow():
+    from src.common.paths import PROJECT_ROOT
+    import calendar as _cal
+
+    month_param = (request.args.get("month") or "").strip()
+    if not month_param:
+        month_param = date.today().strftime("%Y-%m")
+    try:
+        yr, mn = int(month_param[:4]), int(month_param[5:7])
+    except Exception:
+        return jsonify({"error": "invalid month"}), 400
+
+    _, days = _cal.monthrange(yr, mn)
+    month_start = date(yr, mn, 1)
+    month_end   = date(yr, mn, days)
+
+    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+    with open(sched_path, encoding="utf-8") as f:
+        sched = json.load(f)
+
+    # Bill tx_match pattern → display name
+    bill_patterns = {
+        b["tx_match"].lower(): b["name"]
+        for b in sched.get("bills", []) if b.get("tx_match")
+    }
+    # Known scheduled transfer outgoing patterns
+    XFER_PATTERNS = {
+        "schwab bank transfer":      "Schwab Checking",
+        "schwab brokerage moneylink":"Schwab Brokerage",
+        "synchrony bank transfer":   "Synchrony",
+        "edward jones investment":   "Edward Jones",
+        "american airlines":         "AA Credit Union",
+        "5/3 online transfer to":    "53 Savings",
+        "capital one transfer":      "Capital One Savings",
+    }
+
+    def _label_checking(name, amount):
+        """Returns (group, label) for one checking transaction."""
+        n = name.upper()
+        if amount < 0:  # money IN to checking
+            if "EMPLOYER" in n:
+                return "payroll", "Employer Payroll"
+            if "RECEIVED ZELLE PMT" in n:
+                if "RENT PAYMENT" in n:
+                    return "income_other", "House Holdings"
+                who = name.split(" FROM ")[-1].strip().title() if " FROM " in n else "Zelle"
+                return "income_other", f"Zelle ← {who}"
+            if "5/3 ONLINE TRANSFER FROM" in n:
+                return "income_other", "53 Savings ←"
+            if "SCHWAB BROKERAGE MONEYLINK" in n:
+                return "income_other", "Schwab ←"
+            if "CAPITAL ONE TRANSFER" in n:
+                return "income_other", "Capital One ←"
+            return "income_other", name[:45].strip()
+        # outgoing
+        n_lower = name.lower()
+        for pat, label in bill_patterns.items():
+            if pat in n_lower:
+                return "bills", label
+        for pat, label in XFER_PATTERNS.items():
+            if pat in n_lower:
+                return "transfers", label
+        # misc out — clean up display name
+        if "ATM WITHDRAWAL" in n:
+            return "misc_out", "ATM"
+        if "SENT ZELLE PMT" in n and " TO " in n:
+            return "misc_out", "Zelle → " + name.split(" TO ")[-1].strip().title()
+        if "WEB INITIATED PAYMENT AT " in n:
+            after = n.split("WEB INITIATED PAYMENT AT ")[1]
+            _stop = {"CK","SV","WEBXFR","PURCHASE","TRANSFER","PAYMENT","BILLPAY","VILLAGE","GAS","BANK"}
+            parts = [w for w in after.split()
+                     if w not in _stop and not re.match(r'^[A-Z0-9]{8,}$', w)]
+            label = " ".join(parts[:3]).title() if parts else after.split()[0].title()
+            return "misc_out", label
+        return "misc_out", re.sub(r'\s+\w{8,}\s*\d{6}\s*$', '', name).strip()[:40]
+
+    result: dict = {
+        "month": month_param,
+        "checking": {"payroll": [], "income_other": [], "bills": [], "transfers": [], "misc_out": []},
+        "cc_transactions": [],
+        "category_totals": {},
+    }
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    try:
+        # --- Checking account ---
+        for row in conn.execute("""
+            SELECT t.date, t.name, t.amount
+            FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+            WHERE a.subtype = 'checking'
+              AND t.date >= ? AND t.date <= ?
+              AND IFNULL(t.pending, 0) = 0
+            ORDER BY t.date ASC
+        """, (month_start.isoformat(), month_end.isoformat())).fetchall():
+            group, label = _label_checking(row["name"], row["amount"])
+            result["checking"][group].append({
+                "date":   row["date"],
+                "label":  label,
+                "amount": abs(float(row["amount"])),
+            })
+
+        # --- Credit card charges ---
+        cat_totals: dict[str, float] = {}
+        for row in conn.execute("""
+            SELECT t.date, t.name, t.merchant_name, t.amount,
+                   a.name AS acct_name,
+                   tc.user_category, tc.user_subcategory
+            FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            WHERE a.type = 'credit'
+              AND t.amount > 0
+              AND t.date >= ? AND t.date <= ?
+              AND IFNULL(t.pending, 0) = 0
+            ORDER BY t.date ASC
+        """, (month_start.isoformat(), month_end.isoformat())).fetchall():
+            cat   = row["user_category"] or "Uncategorized"
+            amt   = float(row["amount"])
+            cat_totals[cat] = cat_totals.get(cat, 0) + amt
+            result["cc_transactions"].append({
+                "date":     row["date"],
+                "merchant": (row["merchant_name"] or row["name"])[:40],
+                "category": cat,
+                "subcategory": row["user_subcategory"] or "",
+                "amount":   amt,
+                "account":  row["acct_name"],
+            })
+    finally:
+        conn.close()
+
+    result["category_totals"] = dict(
+        sorted(cat_totals.items(), key=lambda x: -x[1])
+    )
+
+    chk = result["checking"]
+    total_in  = sum(e["amount"] for e in chk["payroll"] + chk["income_other"])
+    total_out = sum(e["amount"] for e in chk["bills"] + chk["transfers"] + chk["misc_out"])
+    result["totals"] = {
+        "income":    round(total_in, 2),
+        "bills":     round(sum(e["amount"] for e in chk["bills"]),     2),
+        "transfers": round(sum(e["amount"] for e in chk["transfers"]), 2),
+        "misc_out":  round(sum(e["amount"] for e in chk["misc_out"]),  2),
+        "total_out": round(total_out, 2),
+        "net":       round(total_in - total_out, 2),
+        "cc_spend":  round(sum(r["amount"] for r in result["cc_transactions"]), 2),
+    }
+    return jsonify(result)
+
+
 @reports_bp.route("/api/schedule_amounts", methods=["GET", "POST"])
 @login_required
 def api_schedule_amounts():
@@ -1821,6 +2268,320 @@ def api_insights_summary():
         })
 
     return jsonify(insights)
+
+# ---------------------------------------------------------------------------
+# Statement upload + reconciliation
+# ---------------------------------------------------------------------------
+
+def _ensure_statement_tables(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS uploaded_statements (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename     TEXT NOT NULL,
+            account_type TEXT NOT NULL,
+            institution  TEXT,
+            upload_ts    TEXT DEFAULT (datetime('now')),
+            date_start   TEXT,
+            date_end     TEXT,
+            tx_count     INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS statement_transactions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            statement_id INTEGER NOT NULL
+                         REFERENCES uploaded_statements(id) ON DELETE CASCADE,
+            date         TEXT NOT NULL,
+            description  TEXT,
+            amount       REAL NOT NULL
+        );
+    """)
+
+
+def _detect_csv_cols(columns: list) -> dict:
+    DATE_K   = {"date","transaction date","posted date","post date","trans date",
+                "activity date","posting date","value date","trans. date","settle date"}
+    DESC_K   = {"description","merchant","payee","name","memo","transaction",
+                "details","extended details","narrative","transaction description",
+                "merchant name","transaction detail","memo/description","reference"}
+    AMT_K    = {"amount","transaction amount","net amount","value"}
+    DEBIT_K  = {"debit","withdrawals","withdrawal","charges","debit amount","out","debit/withdrawal"}
+    CREDIT_K = {"credit","deposits","deposit","payments","credit amount","in","credit/deposit"}
+
+    result = {k: None for k in ("date","desc","amount","debit","credit")}
+    for col in columns:
+        c = col.strip().lower()
+        if   c in DATE_K   and result["date"]   is None: result["date"]   = col
+        elif c in DESC_K   and result["desc"]   is None: result["desc"]   = col
+        elif c in AMT_K    and result["amount"] is None: result["amount"] = col
+        elif c in DEBIT_K  and result["debit"]  is None: result["debit"]  = col
+        elif c in CREDIT_K and result["credit"] is None: result["credit"] = col
+    return result
+
+
+def _parse_amt(s) -> "float | None":
+    if s is None:
+        return None
+    s = str(s).strip()
+    if not s or s in ("-", "N/A", ""):
+        return None
+    neg = (s.startswith("(") and s.endswith(")")) or s.lstrip().startswith("-")
+    s = s.replace(",", "").replace("$", "").replace(" ", "").strip("()").lstrip("+-")
+    try:
+        v = float(s)
+        return -v if neg else v
+    except ValueError:
+        return None
+
+
+def _parse_date_s(s) -> "str | None":
+    if not s:
+        return None
+    s = str(s).strip()
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y", "%m-%d-%Y",
+                "%Y/%m/%d", "%d/%m/%Y", "%b %d, %Y", "%B %d, %Y", "%d-%b-%Y"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_statement_csv(file_bytes: bytes) -> "tuple[list, list]":
+    import io as _io
+    errors: list = []
+
+    # Decode file
+    content = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            content = file_bytes.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if content is None:
+        return [], ["Cannot decode file — export as UTF-8 CSV"]
+
+    # Skip leading non-data rows (bank metadata lines)
+    lines = content.splitlines()
+    header_idx = 0
+    for i, line in enumerate(lines):
+        if line.count(",") >= 1 or line.count("\t") >= 1:
+            header_idx = i
+            break
+
+    try:
+        df = pd.read_csv(
+            _io.StringIO("\n".join(lines[header_idx:])),
+            skip_blank_lines=True, on_bad_lines="skip", dtype=str,
+        )
+    except Exception as exc:
+        return [], [f"CSV parse error: {exc}"]
+
+    if df.empty:
+        return [], ["No data rows found in CSV"]
+
+    col = _detect_csv_cols(list(df.columns))
+
+    missing = []
+    if not col["date"]:                                      missing.append("date")
+    if not col["desc"]:                                      missing.append("description")
+    if not col["amount"] and not (col["debit"] or col["credit"]): missing.append("amount")
+    if missing:
+        errors.append(
+            f"Could not identify {', '.join(missing)} column(s). "
+            f"Headers found: {list(df.columns)}"
+        )
+        return [], errors
+
+    txs = []
+    for _, row in df.iterrows():
+        date_s = _parse_date_s(row.get(col["date"]))
+        if not date_s:
+            continue
+        desc = str(row.get(col["desc"], "") or "").strip()
+
+        if col["amount"]:
+            amount = _parse_amt(row.get(col["amount"]))
+        else:
+            debit  = _parse_amt(row.get(col["debit"],  "")) or 0.0
+            credit = _parse_amt(row.get(col["credit"], "")) or 0.0
+            amount = abs(debit) - abs(credit)   # positive = net outflow
+
+        if amount is None:
+            continue
+        txs.append({"date": date_s, "description": desc, "amount": round(amount, 2)})
+
+    txs.sort(key=lambda x: x["date"])
+    if not txs:
+        errors.append("No valid transactions found after parsing — check column formats.")
+    return txs, errors
+
+
+def _reconcile(stmt_txs: list, db_txs: list) -> dict:
+    """Match by abs(amount) within $0.02 and date within 2 days."""
+    TOLERANCE = 0.02
+    pool = list(db_txs)
+    matched, only_stmt = [], []
+
+    for s in stmt_txs:
+        s_abs = abs(s["amount"])
+        best_i, best_score = None, -1
+
+        for i, d in enumerate(pool):
+            try:
+                day_delta = abs((date.fromisoformat(s["date"]) -
+                                 date.fromisoformat(d["date"])).days)
+            except Exception:
+                continue
+            if day_delta > 2:
+                continue
+            if abs(abs(d["amount"]) - s_abs) > TOLERANCE:
+                continue
+            score = 10 - day_delta
+            # Bonus for description overlap
+            s_w = s["description"].lower()[:8]
+            d_w = (d.get("name") or "").lower()[:8]
+            if s_w and d_w and s_w == d_w:
+                score += 3
+            if score > best_score:
+                best_score, best_i = score, i
+
+        if best_i is not None:
+            matched.append({"statement": s, "db": pool.pop(best_i)})
+        else:
+            only_stmt.append(s)
+
+    n = len(stmt_txs)
+    return {
+        "matched":            matched,
+        "only_statement":     only_stmt,
+        "only_db":            pool,
+        "summary": {
+            "statement_count":      n,
+            "db_count":             len(db_txs),
+            "matched_count":        len(matched),
+            "only_statement_count": len(only_stmt),
+            "only_db_count":        len(pool),
+            "match_rate":           round(len(matched) / max(n, 1) * 100, 1),
+        },
+    }
+
+
+@reports_bp.route("/reconcile")
+@login_required
+def reconcile_page():
+    return render_template("reconcile.html")
+
+
+@reports_bp.route("/api/reconcile/history")
+@login_required
+def api_reconcile_history():
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.row_factory = sqlite3.Row
+    try:
+        _ensure_statement_tables(conn)
+        rows = conn.execute(
+            "SELECT id, filename, account_type, institution, upload_ts, "
+            "       date_start, date_end, tx_count "
+            "FROM uploaded_statements ORDER BY upload_ts DESC LIMIT 50"
+        ).fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@reports_bp.route("/api/reconcile/upload", methods=["POST"])
+@login_required
+def api_reconcile_upload():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "No file selected"}), 400
+
+    account_type = request.form.get("account_type", "checking").lower()
+    institution  = request.form.get("institution", "").strip()
+
+    file_bytes = f.read()
+    stmt_txs, parse_errors = _parse_statement_csv(file_bytes)
+    if not stmt_txs:
+        return jsonify({
+            "error": parse_errors[0] if parse_errors else "No transactions found",
+            "parse_errors": parse_errors,
+        }), 400
+
+    dates      = [t["date"] for t in stmt_txs]
+    date_start = min(dates)
+    date_end   = max(dates)
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    db_txs: list = []
+    statement_id = None
+
+    try:
+        _ensure_statement_tables(conn)
+
+        cur = conn.execute(
+            "INSERT INTO uploaded_statements"
+            "(filename, account_type, institution, date_start, date_end, tx_count)"
+            " VALUES(?,?,?,?,?,?)",
+            (f.filename, account_type, institution, date_start, date_end, len(stmt_txs)),
+        )
+        statement_id = cur.lastrowid
+        conn.executemany(
+            "INSERT INTO statement_transactions(statement_id, date, description, amount)"
+            " VALUES(?,?,?,?)",
+            [(statement_id, t["date"], t["description"], t["amount"]) for t in stmt_txs],
+        )
+        conn.commit()
+
+        # Pull DB transactions for the same window
+        if account_type in ("checking", "savings"):
+            rows = conn.execute("""
+                SELECT t.transaction_id, t.date, t.name, t.merchant_name,
+                       t.amount, a.name acct_name
+                FROM transactions t
+                JOIN accounts a ON a.account_id = t.account_id
+                WHERE a.subtype = ? AND t.date BETWEEN ? AND ?
+                  AND IFNULL(t.pending,0)=0
+                ORDER BY t.date
+            """, (account_type, date_start, date_end)).fetchall()
+        elif account_type == "credit":
+            rows = conn.execute("""
+                SELECT t.transaction_id, t.date, t.name, t.merchant_name,
+                       t.amount, a.name acct_name
+                FROM transactions t
+                JOIN accounts a ON a.account_id = t.account_id
+                WHERE a.type = 'credit' AND t.date BETWEEN ? AND ?
+                  AND IFNULL(t.pending,0)=0
+                ORDER BY t.date
+            """, (date_start, date_end)).fetchall()
+        else:
+            rows = []  # mortgage/retirement — no Plaid data
+
+        for r in rows:
+            db_txs.append({
+                "transaction_id": r["transaction_id"],
+                "date":    r["date"],
+                "name":    (r["merchant_name"] or r["name"] or "")[:60],
+                "amount":  float(r["amount"]),
+                "account": r["acct_name"],
+            })
+    finally:
+        conn.close()
+
+    result = _reconcile(stmt_txs, db_txs)
+    result["parse_errors"]  = parse_errors
+    result["date_range"]    = {"start": date_start, "end": date_end}
+    result["account_type"]  = account_type
+    result["filename"]      = f.filename
+    result["statement_id"]  = statement_id
+    return jsonify(result)
+
 
 @reports_bp.route("/api/debug_state")
 @login_required

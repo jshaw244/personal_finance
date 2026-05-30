@@ -40,6 +40,11 @@ runs/.pids/
 
 # Local databases
 data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Claude Code memory/session files
+.claude/
 
 # Macrium images
 *.mrimg
