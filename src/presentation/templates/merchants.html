@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Merchants</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
+
+    .topbar {
+      background: #1a1a2e; color: #eee; padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
+      position: sticky; top: 0; z-index: 50;
+    }
+    .topbar h1 { margin: 0; font-size: 1.05rem; color: #fff; }
+    .topbar a  { color: #aad4f5; font-size: .88rem; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+
+    .filter-bar {
+      background: #fff; border-bottom: 1px solid #dde;
+      padding: .65rem 1.5rem; display: flex; gap: .6rem; flex-wrap: wrap;
+      align-items: center; position: sticky; top: 44px; z-index: 40;
+    }
+    .filter-bar input[type=text],
+    .filter-bar select {
+      padding: .35rem .6rem; border: 1px solid #ccd; border-radius: 6px;
+      font-size: .86rem; background: #fafafa; height: 32px;
+    }
+    .filter-bar input[type=text] { min-width: 200px; }
+    .filter-bar select { min-width: 160px; }
+    .btn-sm {
+      padding: .3rem .7rem; border: none; border-radius: 6px;
+      cursor: pointer; font-size: .84rem; height: 32px;
+    }
+    .btn-ghost   { background: #e9ecef; color: #555; }
+    .btn-ghost:hover { background: #dde; }
+    .result-info { font-size: .8rem; color: #888; margin-left: auto; }
+
+    .table-wrap { padding: .75rem 1.5rem 2rem; overflow-x: auto; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .86rem;
+            background: #fff; border-radius: 8px; overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+    thead th {
+      background: #1a1a2e; color: #eee; padding: .5rem .75rem;
+      text-align: left; font-size: .76rem; text-transform: uppercase;
+      letter-spacing: .04em; white-space: nowrap; user-select: none; cursor: pointer;
+    }
+    thead th:hover { background: #24243e; }
+    thead th.right, tbody td.right { text-align: right; }
+    thead th .sort-arrow { opacity: .4; margin-left: .25rem; }
+    thead th.sorted .sort-arrow { opacity: 1; }
+
+    tbody td { padding: .4rem .75rem; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tbody tr:hover { background: #fafbff; }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .td-merchant { font-weight: 600; max-width: 260px; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; }
+    .td-key      { font-size: .72rem; color: #bbb; font-weight: 400; display: block; }
+    .td-num      { font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; }
+    .td-date     { font-size: .8rem; color: #888; white-space: nowrap; }
+
+    /* Category badge */
+    .cat-wrap { display: flex; align-items: center; gap: .35rem; }
+    .cat-badge {
+      display: inline-block; padding: .15rem .5rem; border-radius: 4px;
+      font-size: .76rem; font-weight: 600; cursor: pointer;
+      background: #e8f0fe; color: #1a56b0; border: 1px solid #c3d7f7;
+      white-space: nowrap;
+    }
+    .cat-badge.none { background: #f5f5f5; color: #999; border-color: #ddd; font-style: italic; }
+    .cat-badge:hover { background: #d0e3ff; }
+    .excl-badge {
+      font-size: .7rem; padding: .1rem .35rem; border-radius: 3px;
+      background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;
+    }
+
+    /* Inline edit row */
+    .edit-row { display: none; background: #f8f9ff; }
+    .edit-row.open { display: table-row; }
+    .edit-row td { padding: .65rem .75rem; border-bottom: 2px solid #c3d7f7; }
+    .edit-panel {
+      display: flex; gap: .75rem; align-items: flex-start; flex-wrap: wrap;
+    }
+    .edit-panel select {
+      padding: .35rem .6rem; border: 1px solid #aac; border-radius: 6px;
+      font-size: .86rem; min-width: 180px;
+    }
+    .edit-panel label { display: flex; align-items: center; gap: .35rem; font-size: .84rem; }
+    .edit-panel label input[type=checkbox] { accent-color: #0078d7; }
+    .edit-actions { display: flex; gap: .5rem; margin-top: .1rem; }
+    .btn-save   { padding: .3rem .75rem; background: #0078d7; color: #fff;
+                  border: none; border-radius: 5px; cursor: pointer; font-size: .84rem; }
+    .btn-save:hover { background: #005fa3; }
+    .btn-cancel { padding: .3rem .65rem; background: #e9ecef; color: #555;
+                  border: none; border-radius: 5px; cursor: pointer; font-size: .84rem; }
+    .btn-cancel:hover { background: #dde; }
+
+    /* Summary strip */
+    .summary-strip {
+      display: flex; gap: 1px; background: #dde; margin: 0 1.5rem .75rem;
+      border-radius: 7px; overflow: hidden; font-size: .85rem;
+    }
+    .summary-strip .seg { flex: 1; background: #fff; padding: .5rem 1rem; text-align: center; }
+    .seg-lbl { display: block; font-size: .7rem; text-transform: uppercase;
+               letter-spacing: .04em; color: #888; margin-bottom: .15rem; }
+    .seg-val { font-weight: 700; font-size: 1.05rem; }
+
+    .loading-msg { padding: 2rem; text-align: center; color: #888; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Merchants</h1>
+  <a href="/reports">← Reports</a>
+  <a href="/reports/budget">Budget</a>
+  <a href="/reports/goals">Savings Goals</a>
+  <a href="/reports/transactions">Transactions</a>
+  <a href="/reports/paycalendar">Pay-Period Calendar</a>
+</div>
+
+<div class="filter-bar">
+  <input type="text" id="q" placeholder="Search merchant…" oninput="applyFilters()">
+  <select id="f-category" onchange="applyFilters()">
+    <option value="">All Categories</option>
+    <option value="__none__">Uncategorized</option>
+  </select>
+  <select id="f-sort" onchange="applyFilters()">
+    <option value="total_out">Sort: Total Spent ↓</option>
+    <option value="tx_count">Sort: # Transactions ↓</option>
+    <option value="last_date">Sort: Most Recent ↓</option>
+    <option value="merchant">Sort: Name A–Z</option>
+  </select>
+  <button class="btn-sm btn-ghost" onclick="clearFilters()">Clear</button>
+  <span class="result-info" id="result-info"></span>
+</div>
+
+<div style="padding:.5rem 1.5rem 0">
+  <div class="summary-strip" id="summary-strip" style="display:none">
+    <div class="seg"><span class="seg-lbl">Merchants</span><span class="seg-val" id="sum-merchants">—</span></div>
+    <div class="seg"><span class="seg-lbl">Total Spent</span><span class="seg-val" id="sum-spent">—</span></div>
+    <div class="seg"><span class="seg-lbl">Total Received</span><span class="seg-val" id="sum-received">—</span></div>
+    <div class="seg"><span class="seg-lbl">Uncategorized</span><span class="seg-val" id="sum-uncat">—</span></div>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <div id="table-container"><div class="loading-msg">Loading…</div></div>
+</div>
+
+<script>
+let allMerchants  = [];   // raw from API
+let allCategories = [];
+let openKey       = null; // currently expanded merchant_key
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function money(n) {
+  return '$' + Math.abs(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtDate(s) {
+  if (!s) return '';
+  const [yr,m,d] = s.split('-');
+  return `${+m}/${+d}/${yr}`;
+}
+
+async function init() {
+  // Load categories
+  allCategories = await fetch('/reports/api/transactions/categories').then(r=>r.json()).catch(()=>[]);
+  const sel = document.getElementById('f-category');
+  allCategories.forEach(c => {
+    const o = document.createElement('option'); o.value=c; o.textContent=c; sel.appendChild(o);
+  });
+
+  // Load merchants
+  allMerchants = await fetch('/reports/api/merchants').then(r=>r.json()).catch(()=>[]);
+  updateSummary(allMerchants);
+  applyFilters();
+}
+
+function updateSummary(data) {
+  const totalSpent    = data.reduce((s,m) => s + m.total_out, 0);
+  const totalReceived = data.reduce((s,m) => s + m.total_in,  0);
+  const uncat         = data.filter(m => !m.category).length;
+  document.getElementById('sum-merchants').textContent = data.length.toLocaleString();
+  document.getElementById('sum-spent').textContent     = money(totalSpent);
+  document.getElementById('sum-received').textContent  = money(totalReceived);
+  document.getElementById('sum-uncat').textContent     = uncat.toLocaleString();
+  document.getElementById('summary-strip').style.display = 'flex';
+}
+
+function applyFilters() {
+  const q    = document.getElementById('q').value.trim().toLowerCase();
+  const cat  = document.getElementById('f-category').value;
+  const sort = document.getElementById('f-sort').value;
+
+  let data = allMerchants.slice();
+
+  if (q)              data = data.filter(m => m.merchant.toLowerCase().includes(q) || m.merchant_key.includes(q));
+  if (cat === '__none__') data = data.filter(m => !m.category);
+  else if (cat)       data = data.filter(m => m.category === cat);
+
+  // Sort
+  data.sort((a, b) => {
+    if (sort === 'merchant')   return a.merchant.localeCompare(b.merchant);
+    if (sort === 'tx_count')   return b.tx_count   - a.tx_count;
+    if (sort === 'last_date')  return b.last_date.localeCompare(a.last_date);
+    return b.total_out - a.total_out;
+  });
+
+  document.getElementById('result-info').textContent =
+    `${data.length.toLocaleString()} merchant${data.length !== 1 ? 's' : ''}`;
+
+  renderTable(data);
+}
+
+function clearFilters() {
+  document.getElementById('q').value = '';
+  document.getElementById('f-category').value = '';
+  document.getElementById('f-sort').value = 'total_out';
+  applyFilters();
+}
+
+function renderTable(data) {
+  if (!data.length) {
+    document.getElementById('table-container').innerHTML =
+      '<div class="loading-msg">No merchants match your filters.</div>';
+    return;
+  }
+
+  let html = `<table><thead><tr>
+    <th>Merchant</th>
+    <th class="right">Spent</th>
+    <th class="right">Received</th>
+    <th class="right"># Tx</th>
+    <th>Last Tx</th>
+    <th>Category</th>
+  </tr></thead><tbody>`;
+
+  for (const m of data) {
+    const catBadge = m.category
+      ? `<span class="cat-badge" onclick="toggleEdit('${escHtml(m.merchant_key)}')">${escHtml(m.category)}</span>`
+      : `<span class="cat-badge none" onclick="toggleEdit('${escHtml(m.merchant_key)}')">— set category —</span>`;
+
+    const exclBadge = m.any_excluded ? `<span class="excl-badge">excl</span>` : '';
+
+    html += `
+    <tr data-key="${escHtml(m.merchant_key)}" onclick="toggleEdit('${escHtml(m.merchant_key)}')">
+      <td class="td-merchant">
+        ${escHtml(m.merchant)}
+        <span class="td-key">${escHtml(m.merchant_key)}</span>
+      </td>
+      <td class="right td-num">${m.total_out ? money(m.total_out) : '<span style="color:#ccc">—</span>'}</td>
+      <td class="right td-num">${m.total_in  ? money(m.total_in)  : '<span style="color:#ccc">—</span>'}</td>
+      <td class="right td-num">${m.tx_count}</td>
+      <td class="td-date">${fmtDate(m.last_date)}</td>
+      <td><div class="cat-wrap">${catBadge}${exclBadge}</div></td>
+    </tr>
+    <tr class="edit-row" id="edit-${CSS.escape(m.merchant_key)}">
+      <td colspan="6">
+        <div class="edit-panel">
+          <div>
+            <div style="font-size:.78rem;color:#888;margin-bottom:.3rem">
+              Category for all <b>${escHtml(m.tx_count)}</b> <b>${escHtml(m.merchant)}</b> transactions:
+            </div>
+            <select id="sel-${CSS.escape(m.merchant_key)}" onchange="onMerchantCatChange(this,'${CSS.escape(m.merchant_key)}')">
+              <option value="">— unchanged —</option>
+              ${allCategories.map(c => `<option value="${escHtml(c)}"${c===m.category?' selected':''}>${escHtml(c)}</option>`).join('')}
+              <option value="__custom__">＋ Custom category…</option>
+            </select>
+            <input type="text" id="custom-${CSS.escape(m.merchant_key)}"
+                   style="display:none;padding:.3rem .4rem;border:1px solid #0078d7;border-radius:5px;font-size:.86rem;width:180px"
+                   placeholder="Type & press Enter…"
+                   onkeydown="submitMerchantCustomCat(event,this,'${CSS.escape(m.merchant_key)}')"
+                   onblur="cancelMerchantCustomCat(this,'${CSS.escape(m.merchant_key)}')">
+          </div>
+          <label>
+            <input type="checkbox" id="excl-${CSS.escape(m.merchant_key)}" ${m.any_excluded?'checked':''}>
+            Exclude from spend analysis
+          </label>
+          <label>
+            <input type="checkbox" id="rule-${CSS.escape(m.merchant_key)}" checked>
+            Also create/update rule for future transactions
+          </label>
+        </div>
+        <div class="edit-actions" style="margin-top:.6rem">
+          <button class="btn-save"   onclick="saveEdit('${escHtml(m.merchant_key)}',event)">Save</button>
+          <button class="btn-cancel" onclick="cancelEdit(event)">Cancel</button>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+function toggleEdit(key) {
+  // Close previously open row
+  if (openKey && openKey !== key) {
+    const prev = document.getElementById('edit-' + CSS.escape(openKey));
+    if (prev) prev.classList.remove('open');
+  }
+  const row = document.getElementById('edit-' + CSS.escape(key));
+  if (!row) return;
+  const isOpen = row.classList.toggle('open');
+  openKey = isOpen ? key : null;
+}
+
+function cancelEdit(e) {
+  e.stopPropagation();
+  if (openKey) {
+    const row = document.getElementById('edit-' + CSS.escape(openKey));
+    if (row) row.classList.remove('open');
+    openKey = null;
+  }
+}
+
+async function saveEdit(key, e) {
+  e.stopPropagation();
+  const category   = document.getElementById('sel-'  + CSS.escape(key)).value;
+  const exclude    = document.getElementById('excl-' + CSS.escape(key)).checked;
+  const createRule = document.getElementById('rule-' + CSS.escape(key)).checked;
+
+  const btn = e.target;
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  try {
+    const resp = await fetch('/reports/api/merchants/classify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ merchant_key: key, category: category || null, exclude_from_spend: exclude, create_rule: createRule }),
+    }).then(r => r.json());
+
+    // Update local data
+    const m = allMerchants.find(m => m.merchant_key === key);
+    if (m) {
+      if (category) m.category = category;
+      m.any_excluded = exclude;
+    }
+
+    // Close and re-render
+    openKey = null;
+    applyFilters();
+
+    if (resp.updated > 0) {
+      // Show brief confirmation
+      const info = document.getElementById('result-info');
+      const prev = info.textContent;
+      info.textContent = `✓ Updated ${resp.updated} transaction${resp.updated!==1?'s':''}`;
+      setTimeout(() => { info.textContent = prev; }, 3000);
+    }
+  } catch (err) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.disabled=false; btn.textContent='Save'; }, 2000);
+  }
+}
+
+function onMerchantCatChange(selectEl, escapedKey) {
+  if (selectEl.value !== '__custom__') return;
+  selectEl.value = '';
+  selectEl.style.display = 'none';
+  const inp = document.getElementById('custom-' + escapedKey);
+  inp.style.display = 'inline-block';
+  inp.value = '';
+  inp.focus();
+}
+
+function submitMerchantCustomCat(e, inputEl, escapedKey) {
+  if (e.key === 'Escape') { cancelMerchantCustomCat(inputEl, escapedKey); return; }
+  if (e.key !== 'Enter') return;
+  const cat = inputEl.value.trim();
+  if (!cat) { cancelMerchantCustomCat(inputEl, escapedKey); return; }
+  if (!allCategories.includes(cat)) { allCategories.push(cat); allCategories.sort(); }
+  // Put the value in the select so saveEdit() reads it normally
+  const sel = document.getElementById('sel-' + escapedKey);
+  const opt = document.createElement('option');
+  opt.value = cat; opt.textContent = cat; opt.selected = true;
+  sel.appendChild(opt);
+  inputEl.style.display = 'none';
+  sel.style.display = '';
+}
+
+function cancelMerchantCustomCat(inputEl, escapedKey) {
+  inputEl.style.display = 'none';
+  document.getElementById('sel-' + escapedKey).style.display = '';
+}
+
+init();
+</script>
+</body>
+</html>

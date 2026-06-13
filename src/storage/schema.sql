@@ -217,6 +217,9 @@ CREATE TABLE IF NOT EXISTS classification_rules (
   -- Optional scope (null = all accounts)
   account_id          TEXT,
 
+  -- Optional amount match (null = any amount; set to match only this exact amount ±$0.02)
+  amount_exact        REAL,
+
   -- Outputs
   exclude_from_spend  INTEGER DEFAULT 0,
   exclude_reason      TEXT,
@@ -239,6 +242,63 @@ CREATE INDEX IF NOT EXISTS idx_class_rules_account
 
 CREATE INDEX IF NOT EXISTS idx_transactions_date_amount
 ON transactions(date, amount);
+
+-- ------------------------------------------------------------
+-- Manual account balances (from statement uploads)
+-- One row per upload; latest row per (institution, account_name) is current balance.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS manual_account_balances (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  institution    TEXT NOT NULL,
+  account_name   TEXT NOT NULL,
+  account_type   TEXT NOT NULL,   -- 'credit', 'brokerage', 'checking', 'savings', 'mortgage'
+  balance        REAL NOT NULL,
+  statement_date TEXT,            -- YYYY-MM-DD closing date from statement
+  source_file    TEXT,            -- original filename
+  uploaded_at    TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_balances_account
+  ON manual_account_balances(institution, account_name, uploaded_at DESC);
+
+-- ------------------------------------------------------------
+-- Savings goals
+-- One row per goal. progress is computed live from savings-account
+-- balance growth since start_balance (snapshot taken at creation).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS savings_goals (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  name           TEXT NOT NULL,
+  target_amount  REAL NOT NULL,        -- dollars to save over the goal window
+  start_date     TEXT NOT NULL,        -- YYYY-MM-DD, goal opened
+  end_date       TEXT NOT NULL,        -- YYYY-MM-DD, target deadline (default Dec 31)
+  start_balance  REAL NOT NULL,        -- total savings balance snapshot at creation
+  status         TEXT DEFAULT 'active',-- 'active' | 'achieved' | 'archived'
+  achieved_at    TEXT,                 -- timestamp when marked achieved
+  created_at     TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_savings_goals_status ON savings_goals(status);
+
+-- ------------------------------------------------------------
+-- Budget framework
+-- budget_plan: per-category tier + manual monthly target ("need").
+--   tier: 'need' | 'want' | 'savings'. Monthless template.
+-- budget_settings: small key/value store (e.g. expected_income).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS budget_plan (
+  category      TEXT PRIMARY KEY,
+  tier          TEXT NOT NULL DEFAULT 'need',   -- 'need' | 'want' | 'savings'
+  target_amount REAL NOT NULL DEFAULT 0,        -- monthly target dollars
+  sort_order    INTEGER DEFAULT 100,
+  updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS budget_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
 -- ============================================================
 -- End of schema.sql

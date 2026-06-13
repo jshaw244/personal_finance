@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Savings Goals</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      body { font-family: system-ui, sans-serif; margin: 2rem; background: #f8f9fa; color: #1a1a2e; }
+      h1 { margin-bottom: .25rem; }
+      a { color: #0078d7; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .small { font-size: .9rem; color: #666; }
+
+      .panel {
+        background: #fff; border-radius: 10px; padding: 1.25rem 1.5rem;
+        box-shadow: 0 1px 6px rgba(0,0,0,.08); margin-top: 1.25rem;
+      }
+      .panel h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
+
+      /* Suggest card */
+      #suggest-note { color: #444; margin: .25rem 0 1rem; line-height: 1.45; }
+      .amount-row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: stretch; }
+      .amount-opt {
+        flex: 1 1 160px; min-width: 150px; border: 2px solid #e3e6ea; border-radius: 10px;
+        padding: .85rem 1rem; cursor: pointer; background: #fafbfc; transition: all .12s;
+      }
+      .amount-opt:hover { border-color: #b9d6f2; }
+      .amount-opt.selected { border-color: #0078d7; background: #eef6ff; }
+      .amount-opt .lbl { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+      .amount-opt .val { font-size: 1.6rem; font-weight: 700; margin-top: .1rem; }
+      .amount-opt .sub { font-size: .78rem; color: #888; margin-top: .15rem; }
+      .amount-opt.custom .val input {
+        width: 100%; font-size: 1.4rem; font-weight: 700; border: none; background: transparent;
+        outline: none; color: #1a1a2e;
+      }
+
+      .create-row { margin-top: 1rem; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+      input[type=text] { padding: .5rem .6rem; border: 1px solid #ccc; border-radius: 6px; font-size: .95rem; }
+      .btn {
+        padding: .55rem 1.1rem; border: none; border-radius: 7px; font-size: .95rem;
+        cursor: pointer; font-weight: 600;
+      }
+      .btn-primary { background: #0078d7; color: #fff; }
+      .btn-primary:hover { background: #0064b5; }
+      .btn-ghost { background: #f1f3f5; color: #444; }
+      .btn-ghost:hover { background: #e6e9ec; }
+      .btn-danger { background: #fdecea; color: #c0392b; }
+      .btn-danger:hover { background: #f9d7d2; }
+
+      /* Goal cards */
+      #goals { display: grid; gap: 1.25rem; margin-top: .25rem; }
+      .goal-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 1.25rem 1.5rem; }
+      .goal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+      .goal-title { font-size: 1.15rem; font-weight: 700; }
+      .goal-dates { font-size: .82rem; color: #888; margin-top: .1rem; }
+      .badge { font-size: .72rem; font-weight: 700; padding: .25rem .6rem; border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; }
+      .badge.ontrack  { background: #e6f7ee; color: #0a7a43; }
+      .badge.behind   { background: #fdecea; color: #c0392b; }
+      .badge.achieved { background: #e7f0ff; color: #0057c2; }
+
+      .bar-wrap { margin: 1rem 0 .4rem; background: #eef0f2; border-radius: 999px; height: 22px; position: relative; overflow: hidden; }
+      .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg,#27ae60,#2ecc71); transition: width .5s ease; }
+      .bar-fill.behind { background: linear-gradient(90deg,#e67e22,#f39c12); }
+      .bar-fill.neg    { background: linear-gradient(90deg,#c0392b,#e74c3c); }
+      .bar-marker { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #555; }
+      .bar-marker::after { content: 'target pace'; position: absolute; top: -16px; left: 4px; font-size: .62rem; color: #555; white-space: nowrap; }
+
+      .stat-row { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-top: .5rem; }
+      .stat .k { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+      .stat .v { font-size: 1.15rem; font-weight: 700; }
+      .stat .v.pos { color: #0a7a43; }
+      .stat .v.neg { color: #c0392b; }
+
+      .goal-chart { margin-top: 1rem; min-height: 260px; }
+      .goal-actions { margin-top: .75rem; display: flex; gap: .5rem; }
+      #empty { color: #777; padding: .5rem 0; }
+    </style>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  </head>
+  <body>
+    <h1>Savings Goals</h1>
+    <p>
+      <a href="/reports/">← Reports</a> &nbsp;|&nbsp;
+      <a href="/reports/budget">Budget</a> &nbsp;|&nbsp;
+      <a href="/reports/monthly">Monthly Cashflow</a> &nbsp;|&nbsp;
+      <a href="/reports/paycalendar">Pay Calendar</a> &nbsp;|&nbsp;
+      <a href="/reports/transactions">Transactions</a>
+    </p>
+    <p class="small">Progress is measured by the real balance growth of your savings accounts
+       (<span id="savings-now">…</span> across all savings accounts today).</p>
+
+    <!-- ── New goal ─────────────────────────────────────────── -->
+    <div class="panel" id="new-goal">
+      <h2>Start a new goal</h2>
+      <p id="suggest-note" class="small">Analyzing your recent savings…</p>
+
+      <div class="amount-row">
+        <div class="amount-opt" id="opt-starter" onclick="pick('starter')">
+          <div class="lbl">Starter — attainable</div>
+          <div class="val" id="starter-val">—</div>
+          <div class="sub">Recommended first goal</div>
+        </div>
+        <div class="amount-opt" id="opt-stretch" onclick="pick('stretch')">
+          <div class="lbl">Stretch</div>
+          <div class="val" id="stretch-val">—</div>
+          <div class="sub">If things go well</div>
+        </div>
+        <div class="amount-opt custom" id="opt-custom" onclick="pickCustomFocus()">
+          <div class="lbl">Custom</div>
+          <div class="val">$<input type="number" id="custom-val" min="1" step="50" placeholder="0" oninput="pick('custom')"></div>
+          <div class="sub">Your own number</div>
+        </div>
+      </div>
+
+      <div class="create-row">
+        <input type="text" id="goal-name" placeholder="Goal name (e.g. Year-End Cushion)" value="Year-End Savings" style="flex:1 1 240px;">
+        <span class="small">by <strong id="deadline">Dec 31</strong></span>
+        <button class="btn btn-primary" id="create-btn" onclick="createGoal()">Create goal</button>
+      </div>
+      <p class="small" id="create-status"></p>
+    </div>
+
+    <!-- ── Existing goals ───────────────────────────────────── -->
+    <div class="panel">
+      <h2>Your goals</h2>
+      <div id="empty" style="display:none;">No goals yet — create your first one above.</div>
+      <div id="goals"></div>
+    </div>
+
+    <script>
+    const $ = id => document.getElementById(id);
+    const money  = n => '$' + Number(n||0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+    const money2 = n => '$' + Number(n||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+    let SUGGEST = { suggested: 0, stretch: 0, end_date: null };
+    let SELECTED = 'starter';
+
+    async function fetchJSON(url, opts) {
+      const r = await fetch(url, opts);
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    }
+
+    function pick(which) {
+      SELECTED = which;
+      ['starter','stretch','custom'].forEach(k =>
+        $('opt-' + k).classList.toggle('selected', k === which));
+    }
+    function pickCustomFocus() { $('custom-val').focus(); pick('custom'); }
+
+    function selectedAmount() {
+      if (SELECTED === 'starter') return SUGGEST.suggested;
+      if (SELECTED === 'stretch') return SUGGEST.stretch;
+      return parseFloat($('custom-val').value) || 0;
+    }
+
+    async function loadSuggest() {
+      try {
+        const s = await fetchJSON('/reports/api/goals/suggest');
+        SUGGEST = s;
+        $('savings-now').textContent = money2(s.current_total);
+        $('suggest-note').textContent = s.note;
+        $('starter-val').textContent = money(s.suggested);
+        $('stretch-val').textContent = money(s.stretch);
+        $('custom-val').placeholder = s.suggested;
+        const d = new Date(s.end_date + 'T00:00:00');
+        $('deadline').textContent = d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+        pick('starter');
+      } catch (e) {
+        $('suggest-note').textContent = 'Could not analyze savings history.';
+      }
+    }
+
+    async function createGoal() {
+      const amount = selectedAmount();
+      if (!amount || amount <= 0) { $('create-status').textContent = 'Pick or enter an amount first.'; return; }
+      $('create-btn').disabled = true;
+      $('create-status').textContent = 'Creating…';
+      try {
+        await fetchJSON('/reports/api/goals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: $('goal-name').value.trim() || 'Year-End Savings',
+            target_amount: amount,
+            end_date: SUGGEST.end_date,
+          }),
+        });
+        $('create-status').textContent = '';
+        await loadGoals();
+      } catch (e) {
+        $('create-status').textContent = 'Error: ' + e.message;
+      } finally {
+        $('create-btn').disabled = false;
+      }
+    }
+
+    async function deleteGoal(id) {
+      if (!confirm('Delete this goal?')) return;
+      await fetch('/reports/api/goals/' + id, { method: 'DELETE' });
+      loadGoals();
+    }
+    async function achieveGoal(id) {
+      await fetch('/reports/api/goals/' + id + '/achieve', { method: 'POST' });
+      loadGoals();
+    }
+
+    function fmtDate(s) {
+      const d = new Date(s + 'T00:00:00');
+      return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+    }
+
+    function goalCard(g) {
+      const pctClamped = Math.max(0, Math.min(100, g.pct));
+      const expectedPct = g.target_amount > 0 ? Math.max(0, Math.min(100, 100 * g.expected / g.target_amount)) : 0;
+      let fillClass = g.progress < 0 ? 'neg' : (g.on_track ? '' : 'behind');
+      let badge = g.achieved
+        ? '<span class="badge achieved">Achieved 🎉</span>'
+        : (g.on_track ? '<span class="badge ontrack">On track</span>' : '<span class="badge behind">Behind pace</span>');
+
+      const projClass = g.projected_eoy >= g.target_amount ? 'pos' : 'neg';
+      const progClass = g.progress < 0 ? 'neg' : 'pos';
+
+      const card = document.createElement('div');
+      card.className = 'goal-card';
+      card.innerHTML = `
+        <div class="goal-head">
+          <div>
+            <div class="goal-title">${g.name}</div>
+            <div class="goal-dates">${fmtDate(g.start_date)} → ${fmtDate(g.end_date)} · target ${money2(g.target_amount)}</div>
+          </div>
+          ${badge}
+        </div>
+
+        <div class="bar-wrap">
+          <div class="bar-fill ${fillClass}" style="width:${pctClamped}%;"></div>
+          ${g.achieved ? '' : `<div class="bar-marker" style="left:${expectedPct}%;"></div>`}
+        </div>
+        <div class="small">${money2(Math.max(g.progress,0))} of ${money2(g.target_amount)} &nbsp;(${g.pct}%)</div>
+
+        <div class="stat-row">
+          <div class="stat"><div class="k">Saved so far</div><div class="v ${progClass}">${money2(g.progress)}</div></div>
+          <div class="stat"><div class="k">Need / month</div><div class="v">${money2(g.need_monthly)}</div></div>
+          <div class="stat"><div class="k">Projected by deadline</div><div class="v ${projClass}">${money2(g.projected_eoy)}</div></div>
+        </div>
+
+        <div class="goal-chart" id="chart-${g.id}"></div>
+
+        <div class="goal-actions">
+          ${g.achieved ? '' : `<button class="btn btn-ghost" onclick="achieveGoal(${g.id})">Mark achieved</button>`}
+          <button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button>
+        </div>`;
+      return card;
+    }
+
+    async function drawTrajectory(g) {
+      try {
+        const s = await fetchJSON('/reports/api/goals/' + g.id + '/series');
+        const actual = s.actual || [];
+        const tl = s.target_line || [];
+        const traces = [
+          {
+            x: tl.map(p => p.date), y: tl.map(p => p.target),
+            name: 'Target pace', type: 'scatter', mode: 'lines',
+            line: { color: '#aab2bd', width: 2, dash: 'dash' },
+            hovertemplate: 'Target by %{x}: %{y:$,.0f}<extra></extra>',
+          },
+          {
+            x: actual.map(p => p.date), y: actual.map(p => p.saved),
+            name: 'Saved', type: 'scatter', mode: 'lines',
+            line: { color: '#0078d7', width: 2.5 },
+            fill: 'tozeroy', fillcolor: 'rgba(0,120,215,0.08)',
+            hovertemplate: '%{x}: %{y:$,.2f}<extra></extra>',
+          },
+        ];
+        Plotly.newPlot('chart-' + g.id, traces, {
+          margin: { t: 20, b: 36, l: 56, r: 16 },
+          font: { family: 'system-ui, sans-serif', size: 11 },
+          paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+          legend: { orientation: 'h', y: -0.2 },
+          yaxis: { tickprefix: '$', tickformat: ',.0f', gridcolor: '#eee', zeroline: true, zerolinecolor: '#ccc' },
+          xaxis: { gridcolor: '#eee' },
+          height: 260,
+        }, { responsive: true, displayModeBar: false });
+      } catch (e) { /* chart optional */ }
+    }
+
+    async function loadGoals() {
+      const data = await fetchJSON('/reports/api/goals');
+      $('savings-now').textContent = money2(data.current_total);
+      const wrap = $('goals');
+      wrap.innerHTML = '';
+      const goals = data.goals || [];
+      $('empty').style.display = goals.length ? 'none' : 'block';
+      for (const g of goals) {
+        wrap.appendChild(goalCard(g));
+        drawTrajectory(g);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadSuggest();
+      await loadGoals();
+    });
+    </script>
+  </body>
+</html>
