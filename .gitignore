@@ -57,3 +57,6 @@ runs/run_main_*.ps1
 
 # Generated report template outputs
 src/presentation/templates/reports_index_*.html
+
+# Uploaded bank statements (personal financial documents)
+statements/
