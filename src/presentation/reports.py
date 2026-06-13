@@ -172,10 +172,15 @@ def _load_tx_detail_from_db() -> pd.DataFrame:
                    tc.user_category,
                    tc.user_subcategory,
                    COALESCE(tc.exclude_from_spend, 0) AS exclude_from_spend,
-                   tc.merchant_normalized
+                   tc.exclude_reason,
+                   tc.merchant_normalized,
+                   a.subtype AS account_subtype,
+                   a.type    AS account_type
             FROM transactions t
             LEFT JOIN transaction_classifications tc
               ON tc.transaction_id = t.transaction_id
+            LEFT JOIN accounts a
+              ON a.account_id = t.account_id
             """,
             conn,
         )
@@ -242,9 +247,17 @@ def _load_tx_detail() -> pd.DataFrame:
     df["exclude_from_spend"] = pd.to_numeric(df.get("exclude_from_spend", 0), errors="coerce").fillna(0).astype(int)
 
     if "amount" in df.columns:
-        df["spending_type"] = df.apply(
-            lambda r: "income" if r["is_income"] else "expense", axis=1
-        )
+        cat_lower = df["category"].str.lower().fillna("")
+        df["spending_type"] = "expense"
+        df.loc[df["is_income"], "spending_type"] = "income"
+        df.loc[cat_lower == "savings",    "spending_type"] = "savings"
+        df.loc[cat_lower == "investment", "spending_type"] = "investment"
+        # anything else that is excluded but not savings/investment is a generic transfer
+        df.loc[
+            (df["exclude_from_spend"] == 1) &
+            ~df["spending_type"].isin(["income", "savings", "investment"]),
+            "spending_type"
+        ] = "transfer"
     else:
         df["spending_type"] = "unknown"
     return df
@@ -259,21 +272,33 @@ def _load_tx_detail_db_only() -> pd.DataFrame:
         conn.close()
 
 
-def _filter_by_range(df: pd.DataFrame, range_key: str) -> pd.DataFrame:
+def _filter_by_range(df: pd.DataFrame, range_key: str,
+                     start: "str | None" = None,
+                     end:   "str | None" = None) -> pd.DataFrame:
     if df.empty or "date" not in df.columns:
         return df
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     today = datetime.today().date()
+
+    # Custom date range takes priority
+    if start:
+        try:
+            s = date.fromisoformat(start)
+            e = date.fromisoformat(end) if end else today
+            return df[(df["date"].dt.date >= s) & (df["date"].dt.date <= e)]
+        except ValueError:
+            pass
+
     if range_key == "30d":
-        start = today - timedelta(days=30)
+        s = today - timedelta(days=30)
     elif range_key == "ytd":
-        start = date(today.year, 1, 1)
+        s = date(today.year, 1, 1)
     elif range_key == "12m":
-        start = today.replace(day=1) - timedelta(days=365)
+        s = today.replace(day=1) - timedelta(days=365)
     else:
         return df
-    return df[df["date"].dt.date >= start]
+    return df[df["date"].dt.date >= s]
 
 # -------------------------------------------------------------------
 # E3: SQLite views + summary table enforcement (with full logging)
@@ -384,7 +409,8 @@ def list_reports_json():
 @reports_bp.route("/api/spending_by_category")
 @login_required
 def api_spending_by_category():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty or "category" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
 
@@ -407,7 +433,8 @@ def api_spending_by_category():
 @reports_bp.route("/api/monthly_trend")
 @login_required
 def api_monthly_trend():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty or "date" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
 
@@ -435,18 +462,21 @@ def api_monthly_trend():
 @reports_bp.route("/api/top_merchants")
 @login_required
 def api_top_merchants():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
     merchant_col = "merchant_name" if "merchant_name" in df.columns else ("name" if "name" in df.columns else None)
     if not merchant_col:
         return jsonify({"error": "missing merchant column"}), 400
-    spend_df = df.loc[~df["is_income"] & (df["exclude_from_spend"] == 0)]
-    top = (spend_df.groupby(merchant_col)["amount"]
-           .sum().sort_values(ascending=False)
-           .head(10).round(2).reset_index())
-    top.columns = ["merchant", "amount"]
-    return jsonify(top.to_dict(orient="records"))
+    spend_df = df.loc[~df["is_income"] & (df["exclude_from_spend"] == 0)].copy()
+    agg = spend_df.groupby(merchant_col).agg(
+        amount=("amount", "sum"),
+        count=("amount", "count"),
+        category=("category", lambda x: x.dropna().mode().iloc[0] if not x.dropna().mode().empty else ""),
+    ).sort_values("amount", ascending=False).head(20).round({"amount": 2}).reset_index()
+    agg.columns = ["merchant", "amount", "count", "category"]
+    return jsonify(agg.to_dict(orient="records"))
 
 
 @reports_bp.route("/api/paycycle_53")
@@ -540,7 +570,8 @@ def api_paycycle_53():
 @reports_bp.route("/api/kpi_summary")
 @login_required
 def api_kpi_summary():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty or "amount" not in df.columns or "date" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
 
@@ -585,7 +616,8 @@ def api_kpi_summary():
 @reports_bp.route("/api/income_expense_split")
 @login_required
 def api_income_expense_split():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty or "amount" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
 
@@ -607,7 +639,8 @@ def api_income_expense_split():
 @reports_bp.route("/api/category_trends")
 @login_required
 def api_category_trends():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty or "category" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
 
@@ -620,32 +653,227 @@ def api_category_trends():
     pivot = grouped.pivot(index="month", columns="category", values="amount").fillna(0)
     return jsonify(pivot.round(2).to_dict(orient="index"))
 
+
+@reports_bp.route("/api/spending_trend")
+@login_required
+def api_spending_trend():
+    """Top-N category spending by month — used for the trend line chart."""
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", "ytd"),
+                          request.args.get("start"), request.args.get("end"))
+    if df.empty:
+        return jsonify({"categories": [], "months": [], "series": {}})
+
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    spend = df[~df["is_income"] & (df["exclude_from_spend"] == 0)].dropna(subset=["date"]).copy()
+    spend["amount"] = spend["amount"].abs()
+    spend["month"]    = spend["date"].dt.to_period("M").astype(str)
+    spend["category"] = spend["category"].fillna("Uncategorized")
+
+    n_top = int(request.args.get("n", 6))
+    top_cats = (spend.groupby("category")["amount"].sum()
+                .sort_values(ascending=False).head(n_top).index.tolist())
+
+    spend = spend[spend["category"].isin(top_cats)]
+    pivot = spend.groupby(["month", "category"])["amount"].sum().unstack(fill_value=0)
+    months = sorted(pivot.index.tolist())
+
+    return jsonify({
+        "categories": top_cats,
+        "months":     months,
+        "series":     {cat: [round(float(pivot.loc[m, cat]) if m in pivot.index and cat in pivot.columns else 0, 2)
+                             for m in months]
+                       for cat in top_cats},
+    })
+
+
+@reports_bp.route("/api/account_history")
+@login_required
+def api_account_history():
+    """Reconstruct daily account balances from current balance + transaction history."""
+    range_key = request.args.get("range", "ytd")
+    start_str = request.args.get("start")
+    end_str   = request.args.get("end")
+    today     = date.today()
+
+    if start_str and end_str:
+        try:
+            range_start = date.fromisoformat(start_str)
+            range_end   = date.fromisoformat(end_str)
+        except ValueError:
+            range_start, range_end = date(today.year, 1, 1), today
+    elif range_key == "30d":
+        range_start, range_end = today - timedelta(days=30), today
+    elif range_key == "12m":
+        range_start = today.replace(day=1) - timedelta(days=365)
+        range_end   = today
+    else:
+        range_start, range_end = date(today.year, 1, 1), today
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    result = []
+    try:
+        accts = conn.execute("""
+            SELECT a.account_id, a.name, a.type, a.subtype, a.current, i.institution_name
+            FROM accounts a
+            JOIN items i ON i.item_id = a.item_id
+            WHERE a.type IN ('depository', 'credit') AND a.current IS NOT NULL
+            ORDER BY a.type DESC, a.subtype, a.name
+        """).fetchall()
+
+        for acct in accts:
+            rows = conn.execute("""
+                SELECT date, SUM(amount) AS day_amt
+                FROM transactions
+                WHERE account_id = ? AND IFNULL(pending,0)=0
+                GROUP BY date ORDER BY date ASC
+            """, (acct["account_id"],)).fetchall()
+
+            if not rows:
+                continue
+
+            daily = {r["date"]: float(r["day_amt"]) for r in rows}
+            all_dates_sorted = sorted(daily.keys())
+            total_all = sum(daily.values())
+
+            # cumulative sum at each date
+            cum = 0.0
+            cumsum = {}
+            for d_str in all_dates_sorted:
+                cum += daily[d_str]
+                cumsum[d_str] = cum
+
+            current_bal = float(acct["current"])
+
+            # cumsum just before range_start
+            pre_cum = 0.0
+            for d_str in all_dates_sorted:
+                if date.fromisoformat(d_str) < range_start:
+                    pre_cum = cumsum[d_str]
+                else:
+                    break
+
+            running = pre_cum
+            dates_out, bals_out = [], []
+            d = range_start
+            while d <= range_end:
+                d_str = d.isoformat()
+                if d_str in daily:
+                    running += daily[d_str]
+                # balance_on_d = current_balance - transactions that happened AFTER d
+                bal = current_bal - (total_all - running)
+                dates_out.append(d_str)
+                bals_out.append(round(bal, 2))
+                d += timedelta(days=1)
+
+            result.append({
+                "name":        acct["name"],
+                "institution": acct["institution_name"],
+                "type":        acct["type"],
+                "subtype":     acct["subtype"],
+                "current":     current_bal,
+                "dates":       dates_out,
+                "balances":    bals_out,
+            })
+    finally:
+        conn.close()
+
+    return jsonify(result)
+
+
 @reports_bp.route("/api/cashflow_summary")
 @login_required
 def api_cashflow_summary():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty or "amount" not in df.columns or "date" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])
-    df["merchant_name"] = df.get("merchant_name", "").fillna("")
-    df["is_income"] = df["merchant_name"].str.contains(
-        "payroll|deposit|refund|credit|reversal", case=False, na=False
-    )
     df["month"] = df["date"].dt.to_period("M").astype(str)
-    inflow = df.loc[df["is_income"]].groupby("month")["amount"].sum().rename("inflow")
-    outflow = df.loc[~df["is_income"]].groupby("month")["amount"].sum().rename("outflow")
-    cash = pd.concat([inflow, outflow], axis=1).fillna(0.0).sort_index()
-    cash["net"] = cash["inflow"] - cash["outflow"]
+
+    # Filter to checking account — this view tracks cash movement through checking only.
+    if "account_subtype" in df.columns:
+        df = df[df["account_subtype"].str.lower().fillna("").eq("checking")]
+
+    if "exclude_from_spend" not in df.columns:
+        df["exclude_from_spend"] = 0
+
+    # Assign cashflow bucket using exclude_reason + user_category + amount.
+    # This works for both newly-classified (new rules) and old classifications
+    # without requiring a full re-classify of the database.
+    _inv_names_cf = (
+        "schwab", "fidelity", "vanguard", "merrill", "edward jones",
+        "e*trade", "etrade", "robinhood", "acorns", "wealthfront", "betterment",
+    )
+
+    def _cashflow_bucket(row) -> str:
+        if row.get("is_income"):
+            return "income"
+        amt    = float(row.get("amount") or 0)
+        cat    = str(row.get("category")       or "").lower()
+        reason = str(row.get("exclude_reason") or "").lower()
+        name   = str(row.get("name")           or "").lower()
+
+        # Zelle: override any old classification — incoming = income, outgoing = expense
+        if "zelle" in name:
+            return "income" if amt < 0 else "expense"
+
+        # Investment — new rule, explicit category, or transfer to investment broker
+        if cat == "investment" or reason == "investment_transfer":
+            return "investment"
+        if any(n in name for n in _inv_names_cf):
+            return "investment"
+
+        # Transfer IN from savings → skip (not income, not an outflow)
+        if reason == "transfer_in_excluded":
+            return "skip"
+        if reason == "pfc_transfer_with_transfer_text" and amt < 0:
+            return "skip"
+
+        # Savings — new rule or old outbound account transfer (not ATM, not Zelle)
+        if cat == "savings" or reason == "savings_transfer_out":
+            return "savings"
+        if reason == "pfc_transfer_with_transfer_text" and amt > 0 and "atm" not in name:
+            return "savings"
+
+        # Everything else positive → expense (CC payments, bills, etc.)
+        if amt > 0:
+            return "expense"
+
+        return "skip"
+
+    df = df.copy()
+    df["cf_bucket"] = df.apply(_cashflow_bucket, axis=1)
+
+    def _monthly_abs(mask):
+        sub = df.loc[mask].copy()
+        return sub.groupby("month")["amount"].apply(lambda s: s.abs().sum())
+
+    inflow     = _monthly_abs(df["cf_bucket"] == "income").rename("inflow")
+    expense    = _monthly_abs(df["cf_bucket"] == "expense").rename("expense")
+    savings    = _monthly_abs(df["cf_bucket"] == "savings").rename("savings")
+    investment = _monthly_abs(df["cf_bucket"] == "investment").rename("investment")
+
+    cash = pd.concat([inflow, expense, savings, investment], axis=1).fillna(0.0).sort_index()
+    cash["outflow"] = cash["expense"] + cash["savings"] + cash["investment"]
+    cash["net"]     = cash["inflow"] - cash["outflow"]
     cash["running_balance"] = cash["net"].cumsum()
+
     out = []
     for idx, row in cash.round(2).iterrows():
         out.append({
-            "month": idx,
-            "inflow": float(row["inflow"]),
-            "outflow": float(row["outflow"]),
-            "net": float(row["net"]),
+            "month":           idx,
+            "inflow":          float(row["inflow"]),
+            "outflow":         float(row["outflow"]),
+            "expense":         float(row["expense"]),
+            "savings":         float(row["savings"]),
+            "investment":      float(row["investment"]),
+            "net":             float(row["net"]),
             "running_balance": float(row["running_balance"]),
         })
     return jsonify(out)
@@ -657,7 +885,8 @@ def api_recurring_merchants():
     Identify recurring merchants based on transaction frequency and month coverage.
     Handles empty datasets gracefully and adds safe defaults for parameters.
     """
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
 
     # ✅ Defensive guard for missing or empty data
     if df.empty or "amount" not in df.columns:
@@ -753,7 +982,8 @@ def api_recurring_merchants():
 @reports_bp.route("/api/top_transactions")
 @login_required
 def api_top_transactions():
-    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""))
+    df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
+                         request.args.get("start"), request.args.get("end"))
     if df.empty:
         return jsonify({"error": "no transaction data"}), 404
     df = df.copy()
@@ -1544,7 +1774,39 @@ def api_account_balances():
             "available":    float(r["available"]) if r["available"] is not None else None,
             "limit":        float(r["balance_limit"]) if r["balance_limit"] is not None else None,
             "updated_at":   (r["updated_at"] or "")[:10],
+            "source":       "plaid",
         })
+
+    # Append latest manual balances (statement uploads)
+    try:
+        conn2 = sqlite3.connect(str(DB_PATH), timeout=10)
+        conn2.row_factory = sqlite3.Row
+        _ensure_manual_balance_table(conn2)
+        manual = conn2.execute("""
+            SELECT id, institution, account_name, account_type, balance, statement_date, uploaded_at
+            FROM manual_account_balances
+            WHERE id IN (
+                SELECT MAX(id) FROM manual_account_balances GROUP BY institution, account_name
+            )
+            ORDER BY institution, account_name
+        """).fetchall()
+        conn2.close()
+        for m in manual:
+            accounts.append({
+                "name":        m["account_name"],
+                "institution": m["institution"],
+                "type":        m["account_type"],
+                "subtype":     m["account_type"],
+                "current":     float(m["balance"]),
+                "available":   None,
+                "limit":       None,
+                "updated_at":  (m["statement_date"] or m["uploaded_at"] or "")[:10],
+                "source":      "manual",
+                "manual_id":   m["id"],
+            })
+    except Exception:
+        pass
+
     return jsonify(accounts)
 
 
@@ -2416,6 +2678,369 @@ def _parse_statement_csv(file_bytes: bytes) -> "tuple[list, list]":
     return txs, errors
 
 
+def _parse_statement_pdf(file_bytes: bytes) -> "tuple[list, list]":
+    """Parse a credit card PDF statement (Synchrony and similar formats)."""
+    try:
+        import pdfplumber
+    except ImportError:
+        return [], ["pdfplumber not installed — run: pip install pdfplumber"]
+
+    import io as _io, re
+
+    errors: list = []
+    txs:    list = []
+
+    # Date patterns: MM/DD, MM/DD/YY, MM/DD/YYYY
+    DATE_RE = re.compile(r"^(\d{1,2}/\d{1,2}(?:/\d{2,4})?)")
+    # Amount at end of line: trailing "-" for credits (Synchrony style: 123.45-)
+    AMT_RE2 = re.compile(r"\$?([\d,]+\.\d{2})(-?)\s*(?:CR)?\s*$", re.IGNORECASE)
+
+    def _try_parse_date_with_year(s: str, year: int) -> "str | None":
+        """Parse MM/DD or MM/DD/YY or MM/DD/YYYY; fill in year when missing."""
+        parts = s.strip().split("/")
+        if len(parts) == 2:
+            try:
+                m, d = int(parts[0]), int(parts[1])
+                return date(year, m, d).isoformat()
+            except ValueError:
+                return None
+        return _parse_date_s(s)
+
+    def _sniff_year(text: str) -> int:
+        """Pull the statement year from the PDF header text."""
+        m = re.search(r"\b(20\d{2})\b", text)
+        return int(m.group(1)) if m else datetime.today().year
+
+    def _parse_amt_pdf(s: str) -> "float | None":
+        """Parse an amount cell from a PDF table, handling trailing '-' for credits."""
+        if not s:
+            return None
+        s = s.strip()
+        is_credit = s.endswith("-") or s.upper().endswith("CR")
+        s = re.sub(r"[CR\-]$", "", s, flags=re.IGNORECASE).strip()
+        v = _parse_amt(s)
+        if v is None:
+            return None
+        return -abs(v) if is_credit else abs(v)
+
+    try:
+        with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+            first_text = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+            year = _sniff_year(first_text)
+
+            for page in pdf.pages:
+                # ── Try structured table extraction first ──────────────────
+                tables = page.extract_tables() or []
+                for tbl in tables:
+                    if not tbl:
+                        continue
+                    # Detect header row
+                    header = [str(c or "").lower().strip() for c in tbl[0]]
+                    col = _detect_csv_cols([str(c or "") for c in tbl[0]])
+
+                    # If no recognisable headers try treating first row as data
+                    data_rows = tbl[1:] if any(col[k] for k in col) else tbl
+
+                    for row in data_rows:
+                        if not row:
+                            continue
+                        cells = [str(c or "").strip() for c in row]
+
+                        if col["date"]:
+                            hi = header.index(col["date"].lower().strip()) if col["date"].lower().strip() in header else 0
+                            date_s = _try_parse_date_with_year(cells[hi] if hi < len(cells) else "", year)
+                        else:
+                            # Heuristic: first cell that looks like a date
+                            date_s = None
+                            for cell in cells[:3]:
+                                if DATE_RE.match(cell):
+                                    date_s = _try_parse_date_with_year(cell, year)
+                                    break
+
+                        if not date_s:
+                            continue
+
+                        # Description: prefer mapped col, else second non-date cell
+                        if col["desc"]:
+                            di = header.index(col["desc"].lower().strip()) if col["desc"].lower().strip() in header else 1
+                            desc = cells[di] if di < len(cells) else ""
+                        else:
+                            desc = cells[1] if len(cells) > 1 else ""
+
+                        # Amount
+                        if col["amount"]:
+                            ai = header.index(col["amount"].lower().strip()) if col["amount"].lower().strip() in header else -1
+                            amt = _parse_amt_pdf(cells[ai]) if 0 <= ai < len(cells) else None
+                        elif col["debit"] or col["credit"]:
+                            di2 = header.index(col["debit"].lower().strip())  if col["debit"]  and col["debit"].lower().strip()  in header else -1
+                            ci2 = header.index(col["credit"].lower().strip()) if col["credit"] and col["credit"].lower().strip() in header else -1
+                            dv = _parse_amt_pdf(cells[di2]) if 0 <= di2 < len(cells) else 0.0
+                            cv = _parse_amt_pdf(cells[ci2]) if 0 <= ci2 < len(cells) else 0.0
+                            amt = (abs(dv or 0) - abs(cv or 0)) or None
+                        else:
+                            # Last numeric-looking cell
+                            amt = None
+                            for cell in reversed(cells):
+                                v = _parse_amt_pdf(cell)
+                                if v is not None:
+                                    amt = v
+                                    break
+
+                        if amt is None or desc == "":
+                            continue
+                        txs.append({"date": date_s, "description": desc[:80], "amount": round(amt, 2)})
+
+                # ── Text fallback: line-by-line regex ──────────────────────
+                if not tables:
+                    text = page.extract_text() or ""
+                    for line in text.splitlines():
+                        line = line.strip()
+                        m_date = DATE_RE.match(line)
+                        if not m_date:
+                            continue
+                        m_amt = AMT_RE2.search(line)
+                        if not m_amt:
+                            continue
+                        date_s = _try_parse_date_with_year(m_date.group(1), year)
+                        if not date_s:
+                            continue
+                        raw_val = m_amt.group(1).replace(",", "")
+                        is_cr   = bool(m_amt.group(2))  # trailing "-"
+                        try:
+                            amt = float(raw_val) * (-1 if is_cr else 1)
+                        except ValueError:
+                            continue
+                        # Description = everything between date and amount
+                        remainder = line[m_date.end():m_amt.start()].strip()
+                        # Strip a second date (post date) if present
+                        remainder = re.sub(r"^\d{1,2}/\d{1,2}(?:/\d{2,4})?\s*", "", remainder)
+                        desc = remainder.strip()
+                        if not desc:
+                            continue
+                        txs.append({"date": date_s, "description": desc[:80], "amount": round(amt, 2)})
+
+    except Exception as exc:
+        return [], [f"PDF parse error: {exc}"]
+
+    # Deduplicate exact duplicates that can appear from overlapping table/text extraction
+    seen: set = set()
+    deduped = []
+    for t in txs:
+        key = (t["date"], t["description"], t["amount"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(t)
+
+    deduped.sort(key=lambda x: x["date"])
+    if not deduped:
+        errors.append(
+            "No transactions found in PDF. "
+            "Ensure this is a credit card statement with a date + description + amount on each row."
+        )
+    return deduped, errors
+
+
+def _extract_balance_from_pdf(file_bytes: bytes) -> dict:
+    """
+    Extract closing balance and statement date from a Synchrony or Schwab PDF.
+    Returns {"balance": float|None, "statement_date": str|None, "label": str}
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        return {"balance": None, "statement_date": None, "label": ""}
+
+    import io as _io, re
+
+    # (pattern, label) — searched case-insensitively against full text
+    BALANCE_PATTERNS = [
+        (r"new\s+balance\s+\$?([\d,]+\.\d{2})",               "New Balance"),
+        (r"statement\s+balance\s*[:\-]?\s*\$?([\d,]+\.\d{2})", "Statement Balance"),
+        (r"total\s+account\s+value\s*[:\-]?\s*\$?([\d,]+\.\d{2})", "Total Account Value"),
+        (r"net\s+account\s+value\s*[:\-]?\s*\$?([\d,]+\.\d{2})",   "Net Account Value"),
+        (r"total\s+market\s+value\s*[:\-]?\s*\$?([\d,]+\.\d{2})",  "Total Market Value"),
+        (r"total\s+portfolio\s+value\s*[:\-]?\s*\$?([\d,]+\.\d{2})","Total Portfolio Value"),
+        (r"portfolio\s+value\s*[:\-]?\s*\$?([\d,]+\.\d{2})",        "Portfolio Value"),
+        (r"ending\s+balance\s*[:\-]?\s*\$?([\d,]+\.\d{2})",         "Ending Balance"),
+        (r"closing\s+balance\s*[:\-]?\s*\$?([\d,]+\.\d{2})",        "Closing Balance"),
+        (r"account\s+balance\s*[:\-]?\s*\$?([\d,]+\.\d{2})",        "Account Balance"),
+    ]
+    DATE_PATTERNS = [
+        r"statement\s+(?:closing\s+)?date\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{2,4})",
+        r"closing\s+date\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{2,4})",
+        r"statement\s+date\s*[:\-]?\s*(\w+ \d{1,2},\s*\d{4})",
+        r"(?:for\s+the\s+period|statement\s+period).*?to\s+(\w+ \d{1,2},\s*\d{4})",
+        r"(?:for\s+the\s+period|statement\s+period).*?to\s+(\d{1,2}/\d{1,2}/\d{2,4})",
+        r"as\s+of\s+(\d{1,2}/\d{1,2}/\d{2,4})",
+        r"as\s+of\s+(\w+ \d{1,2},\s*\d{4})",
+    ]
+
+    all_text = ""
+    try:
+        with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                all_text += (page.extract_text() or "") + "\n"
+    except Exception as exc:
+        return {"balance": None, "statement_date": None, "label": "", "error": str(exc)}
+
+    lower = all_text.lower()
+    balance, label = None, ""
+    for pat, lbl in BALANCE_PATTERNS:
+        m = re.search(pat, lower)
+        if m:
+            try:
+                balance = float(m.group(1).replace(",", ""))
+                label = lbl
+                break
+            except ValueError:
+                continue
+
+    stmt_date = None
+    for pat in DATE_PATTERNS:
+        m = re.search(pat, lower)
+        if m:
+            stmt_date = _parse_date_s(m.group(1))
+            if stmt_date:
+                break
+
+    return {"balance": balance, "statement_date": stmt_date, "label": label}
+
+
+def _ensure_manual_balance_table(conn) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS manual_account_balances (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            institution    TEXT NOT NULL,
+            account_name   TEXT NOT NULL,
+            account_type   TEXT NOT NULL,
+            balance        REAL NOT NULL,
+            statement_date TEXT,
+            source_file    TEXT,
+            uploaded_at    TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+
+
+@reports_bp.route("/api/statement/extract_balance", methods=["POST"])
+@login_required
+def api_extract_balance():
+    """Parse a statement PDF and return the detected balance without saving."""
+    if "file" not in request.files or not request.files["file"].filename:
+        return jsonify({"error": "No file uploaded"}), 400
+    f = request.files["file"]
+    file_bytes = f.read()
+    if not (f.filename.lower().endswith(".pdf") or file_bytes[:4] == b"%PDF"):
+        return jsonify({"error": "Only PDF files are supported for balance extraction"}), 400
+    result = _extract_balance_from_pdf(file_bytes)
+    result["filename"] = f.filename
+    return jsonify(result)
+
+
+@reports_bp.route("/api/statement/balance", methods=["POST"])
+@login_required
+def api_save_statement_balance():
+    """Save a manually supplied or auto-extracted account balance."""
+    # Accepts either JSON or multipart form (with optional file)
+    if request.content_type and request.content_type.startswith("application/json"):
+        body = request.get_json() or {}
+        institution   = (body.get("institution") or "").strip()
+        account_name  = (body.get("account_name") or "").strip()
+        account_type  = (body.get("account_type") or "credit").strip().lower()
+        balance       = body.get("balance")
+        stmt_date     = (body.get("statement_date") or "").strip() or None
+        source_file   = (body.get("source_file") or "").strip() or None
+    else:
+        institution   = (request.form.get("institution") or "").strip()
+        account_name  = (request.form.get("account_name") or "").strip()
+        account_type  = (request.form.get("account_type") or "credit").strip().lower()
+        raw_balance   = request.form.get("balance")
+        stmt_date     = (request.form.get("statement_date") or "").strip() or None
+        source_file   = None
+        balance       = None
+
+        # If a PDF was uploaded, try auto-extraction first
+        if "file" in request.files and request.files["file"].filename:
+            f = request.files["file"]
+            file_bytes = f.read()
+            source_file = f.filename
+            if f.filename.lower().endswith(".pdf") or file_bytes[:4] == b"%PDF":
+                extracted = _extract_balance_from_pdf(file_bytes)
+                if extracted["balance"] is not None:
+                    balance = extracted["balance"]
+                    if not stmt_date and extracted["statement_date"]:
+                        stmt_date = extracted["statement_date"]
+
+        if balance is None and raw_balance:
+            try:
+                balance = float(str(raw_balance).replace(",", "").replace("$", ""))
+            except ValueError:
+                pass
+
+    if not institution:
+        return jsonify({"error": "institution required"}), 400
+    if not account_name:
+        return jsonify({"error": "account_name required"}), 400
+    if balance is None:
+        return jsonify({"error": "balance could not be determined — enter it manually"}), 400
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    try:
+        _ensure_manual_balance_table(conn)
+        conn.execute(
+            "INSERT INTO manual_account_balances "
+            "(institution, account_name, account_type, balance, statement_date, source_file) "
+            "VALUES (?,?,?,?,?,?)",
+            (institution, account_name, account_type, float(balance), stmt_date, source_file),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({"ok": True, "balance": balance, "statement_date": stmt_date})
+
+
+@reports_bp.route("/api/statement/balances")
+@login_required
+def api_list_statement_balances():
+    """Return the latest balance entry for each (institution, account_name) pair."""
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.row_factory = sqlite3.Row
+    try:
+        _ensure_manual_balance_table(conn)
+        rows = conn.execute("""
+            SELECT id, institution, account_name, account_type,
+                   balance, statement_date, source_file, uploaded_at
+            FROM manual_account_balances
+            WHERE id IN (
+                SELECT MAX(id) FROM manual_account_balances
+                GROUP BY institution, account_name
+            )
+            ORDER BY institution, account_name
+        """).fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@reports_bp.route("/api/statement/balance/<int:balance_id>", methods=["DELETE"])
+@login_required
+def api_delete_statement_balance(balance_id):
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    try:
+        conn.execute("DELETE FROM manual_account_balances WHERE id = ?", (balance_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
 def _reconcile(stmt_txs: list, db_txs: list) -> dict:
     """Match by abs(amount) within $0.02 and date within 2 days."""
     TOLERANCE = 0.02
@@ -2504,7 +3129,10 @@ def api_reconcile_upload():
     institution  = request.form.get("institution", "").strip()
 
     file_bytes = f.read()
-    stmt_txs, parse_errors = _parse_statement_csv(file_bytes)
+    is_pdf = (f.filename or "").lower().endswith(".pdf") or file_bytes[:4] == b"%PDF"
+    stmt_txs, parse_errors = (
+        _parse_statement_pdf(file_bytes) if is_pdf else _parse_statement_csv(file_bytes)
+    )
     if not stmt_txs:
         return jsonify({
             "error": parse_errors[0] if parse_errors else "No transactions found",
@@ -2583,6 +3211,363 @@ def api_reconcile_upload():
     return jsonify(result)
 
 
+# ---------------------------------------------------------------------------
+# Transaction management + classification rules
+# ---------------------------------------------------------------------------
+
+_COMMON_CATEGORIES = [
+    "Bank Fees", "Bills & Utilities", "Coffee & Tea",
+    "Credit Card Payment", "Education", "Entertainment",
+    "Food & Drink", "Gas", "Gifts & Donations", "Groceries",
+    "Health & Medical", "Home Improvement", "Housing",
+    "Income", "Insurance", "Investment",
+    "Loan Payments", "Personal Care", "Pets", "Pharmacy",
+    "Restaurants", "Savings", "Services", "Shopping",
+    "Streaming", "Subscriptions", "Transfer In", "Transfer Out",
+    "Transportation", "Travel", "Other",
+]
+
+
+@reports_bp.route("/transactions")
+@login_required
+def transactions_page():
+    return render_template("transactions.html")
+
+
+@reports_bp.route("/api/transactions")
+@login_required
+def api_transactions():
+    page     = max(1, int(request.args.get("page", 1)))
+    per_page = min(200, max(10, int(request.args.get("per_page", 50))))
+    q        = (request.args.get("q") or "").strip().lower()
+    cat      = (request.args.get("category") or "").strip()
+    acct_sub = (request.args.get("account_subtype") or "").strip()
+    month    = (request.args.get("month") or "").strip()
+    start    = (request.args.get("start") or "").strip()
+    end      = (request.args.get("end") or "").strip()
+
+    amt_min  = request.args.get("amt_min")
+    amt_max  = request.args.get("amt_max")
+
+    filters, params = ["IFNULL(t.pending, 0) = 0"], []
+
+    if q:
+        filters.append("(LOWER(COALESCE(t.merchant_name,'')) LIKE ? OR LOWER(t.name) LIKE ?)")
+        params += [f"%{q}%", f"%{q}%"]
+    if cat == "__none__":
+        filters.append("(tc.user_category IS NULL OR tc.user_category = '')")
+    elif cat:
+        filters.append("tc.user_category = ?"); params.append(cat)
+    if acct_sub:
+        filters.append("a.subtype = ?"); params.append(acct_sub)
+    if month:
+        filters.append("t.date LIKE ?"); params.append(f"{month}%")
+    elif start and end:
+        filters.append("t.date BETWEEN ? AND ?"); params += [start, end]
+    try:
+        if amt_min:
+            filters.append("ABS(t.amount) >= ?"); params.append(float(amt_min))
+        if amt_max:
+            filters.append("ABS(t.amount) <= ?"); params.append(float(amt_max))
+    except ValueError:
+        pass
+
+    where = "WHERE " + " AND ".join(filters)
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    try:
+        total = conn.execute(f"""
+            SELECT COUNT(*) FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            {where}
+        """, params).fetchone()[0]
+
+        rows = conn.execute(f"""
+            SELECT t.transaction_id, t.date, t.name, t.merchant_name, t.amount,
+                   a.name AS account_name, a.type AS account_type, a.subtype,
+                   COALESCE(tc.user_category,'')  AS user_category,
+                   COALESCE(tc.user_subcategory,'') AS user_subcategory,
+                   COALESCE(tc.exclude_from_spend, 0) AS exclude_from_spend,
+                   COALESCE(tc.merchant_normalized,
+                       LOWER(COALESCE(t.merchant_name, t.name, ''))) AS merchant_norm
+            FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            {where}
+            ORDER BY t.date DESC, t.transaction_id
+            LIMIT ? OFFSET ?
+        """, params + [per_page, (page - 1) * per_page]).fetchall()
+    finally:
+        conn.close()
+
+    return jsonify({
+        "transactions": [dict(r) for r in rows],
+        "total":    total,
+        "page":     page,
+        "pages":    math.ceil(total / per_page) if total else 1,
+        "per_page": per_page,
+    })
+
+
+@reports_bp.route("/api/transactions/categories")
+@login_required
+def api_transaction_categories():
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT user_category FROM transaction_classifications "
+            "WHERE user_category IS NOT NULL AND user_category != '' "
+            "ORDER BY user_category"
+        ).fetchall()
+    finally:
+        conn.close()
+    db_cats = [r["user_category"] for r in rows]
+    merged  = sorted(set(_COMMON_CATEGORIES) | set(db_cats))
+    return jsonify(merged)
+
+
+@reports_bp.route("/api/transactions/classify", methods=["POST"])
+@login_required
+def api_classify_transaction():
+    body           = request.get_json() or {}
+    tx_id          = body.get("transaction_id")
+    category       = body.get("category") or None
+    subcategory    = body.get("subcategory") or None
+    exclude        = bool(body.get("exclude_from_spend", False))
+    create_rule    = bool(body.get("create_rule", False))
+    rule_value     = (body.get("rule_match_value") or "").strip().lower()
+    apply_existing = bool(body.get("apply_to_existing", False))
+    # None = any amount; float = exact amount match (±$0.02)
+    raw_amt_exact  = body.get("amount_exact")
+    amount_exact: "float | None" = None
+    if raw_amt_exact is not None:
+        try:
+            amount_exact = float(raw_amt_exact)
+        except (TypeError, ValueError):
+            pass
+
+    if not tx_id:
+        return jsonify({"error": "transaction_id required"}), 400
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    rule_id = None
+    affected = 0
+    try:
+        tx = conn.execute(
+            "SELECT LOWER(COALESCE(merchant_name, name, '')) AS mn, amount FROM transactions WHERE transaction_id = ?",
+            (tx_id,)
+        ).fetchone()
+        merchant_norm = tx["mn"] if tx else rule_value
+
+        conn.execute("""
+            INSERT INTO transaction_classifications
+            (transaction_id, user_category, user_subcategory, exclude_from_spend, merchant_normalized, updated_at)
+            VALUES (?,?,?,?,?,datetime('now'))
+            ON CONFLICT(transaction_id) DO UPDATE SET
+                user_category       = excluded.user_category,
+                user_subcategory    = excluded.user_subcategory,
+                exclude_from_spend  = excluded.exclude_from_spend,
+                merchant_normalized = excluded.merchant_normalized,
+                updated_at          = excluded.updated_at
+        """, (tx_id, category, subcategory, 1 if exclude else 0, merchant_norm))
+
+        if create_rule and rule_value:
+            cur = conn.execute("""
+                INSERT INTO classification_rules
+                (enabled, priority, match_field, match_op, match_value,
+                 user_category, user_subcategory, exclude_from_spend, amount_exact,
+                 created_at, updated_at)
+                VALUES (1, 100, 'merchant_normalized', 'contains', ?, ?, ?, ?, ?,
+                        datetime('now'), datetime('now'))
+            """, (rule_value, category, subcategory, 1 if exclude else 0, amount_exact))
+            rule_id = cur.lastrowid
+
+            if apply_existing:
+                # Amount filter clause — only applies when amount_exact is set
+                amt_clause = "AND ABS(t.amount - ?) <= 0.02" if amount_exact is not None else ""
+                amt_param  = [amount_exact] if amount_exact is not None else []
+
+                affected = conn.execute(f"""
+                    UPDATE transaction_classifications
+                    SET user_category=?, user_subcategory=?, exclude_from_spend=?, updated_at=datetime('now')
+                    WHERE transaction_id != ?
+                      AND LOWER(COALESCE(merchant_normalized,'')) LIKE ?
+                      AND transaction_id IN (
+                          SELECT t.transaction_id FROM transactions t
+                          WHERE t.transaction_id = transaction_classifications.transaction_id
+                          {amt_clause}
+                      )
+                """, [category, subcategory, 1 if exclude else 0, tx_id, f"%{rule_value}%"] + amt_param).rowcount
+
+                affected += conn.execute(f"""
+                    INSERT INTO transaction_classifications
+                    (transaction_id, user_category, user_subcategory, exclude_from_spend, merchant_normalized, updated_at)
+                    SELECT t.transaction_id, ?, ?, ?, LOWER(COALESCE(t.merchant_name,t.name,'')), datetime('now')
+                    FROM transactions t
+                    LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+                    WHERE tc.transaction_id IS NULL
+                      AND LOWER(COALESCE(t.merchant_name,t.name,'')) LIKE ?
+                      AND t.transaction_id != ?
+                      {amt_clause}
+                """, [category, subcategory, 1 if exclude else 0, f"%{rule_value}%", tx_id] + amt_param).rowcount
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({"ok": True, "rule_id": rule_id, "affected": affected})
+
+
+@reports_bp.route("/api/classification_rules")
+@login_required
+def api_list_rules():
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT rule_id, enabled, priority, match_field, match_op, match_value, "
+            "user_category, user_subcategory, exclude_from_spend, created_at "
+            "FROM classification_rules ORDER BY priority, created_at"
+        ).fetchall()
+    finally:
+        conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@reports_bp.route("/api/classification_rules/<int:rule_id>", methods=["DELETE"])
+@login_required
+def api_delete_rule(rule_id):
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    try:
+        conn.execute("DELETE FROM classification_rules WHERE rule_id = ?", (rule_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@reports_bp.route("/merchants")
+@login_required
+def merchants_page():
+    return render_template("merchants.html")
+
+
+@reports_bp.route("/api/merchants")
+@login_required
+def api_merchants():
+    """Aggregate transactions by merchant with category, count, total, last date."""
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT
+                COALESCE(t.merchant_name, t.name, '(unknown)') AS merchant,
+                LOWER(COALESCE(t.merchant_name, t.name, ''))   AS merchant_key,
+                COUNT(*)                                         AS tx_count,
+                SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) AS total_out,
+                SUM(CASE WHEN t.amount < 0 THEN ABS(t.amount) ELSE 0 END) AS total_in,
+                MAX(t.date)                                      AS last_date,
+                -- mode category: most recent non-null user_category for this merchant
+                (SELECT tc2.user_category
+                 FROM transactions t2
+                 LEFT JOIN transaction_classifications tc2 ON tc2.transaction_id = t2.transaction_id
+                 WHERE LOWER(COALESCE(t2.merchant_name, t2.name, ''))
+                       = LOWER(COALESCE(t.merchant_name, t.name, ''))
+                   AND tc2.user_category IS NOT NULL AND tc2.user_category != ''
+                 ORDER BY t2.date DESC LIMIT 1
+                ) AS category,
+                MAX(COALESCE(tc.exclude_from_spend, 0))          AS any_excluded
+            FROM transactions t
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            WHERE IFNULL(t.pending, 0) = 0
+            GROUP BY LOWER(COALESCE(t.merchant_name, t.name, ''))
+            ORDER BY total_out DESC
+        """).fetchall()
+    finally:
+        conn.close()
+
+    return jsonify([{
+        "merchant":    r["merchant"],
+        "merchant_key": r["merchant_key"],
+        "tx_count":    r["tx_count"],
+        "total_out":   round(float(r["total_out"] or 0), 2),
+        "total_in":    round(float(r["total_in"]  or 0), 2),
+        "last_date":   r["last_date"] or "",
+        "category":    r["category"] or "",
+        "any_excluded":bool(r["any_excluded"]),
+    } for r in rows])
+
+
+@reports_bp.route("/api/merchants/classify", methods=["POST"])
+@login_required
+def api_classify_merchant():
+    """Set category + optionally create rule for ALL transactions of a merchant."""
+    body         = request.get_json() or {}
+    merchant_key = (body.get("merchant_key") or "").strip().lower()
+    category     = body.get("category") or None
+    exclude      = bool(body.get("exclude_from_spend", False))
+    create_rule  = bool(body.get("create_rule", True))
+
+    if not merchant_key:
+        return jsonify({"error": "merchant_key required"}), 400
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    updated = 0
+    rule_id = None
+    try:
+        # Get all matching transaction_ids
+        tx_ids = [r[0] for r in conn.execute("""
+            SELECT t.transaction_id FROM transactions t
+            WHERE LOWER(COALESCE(t.merchant_name, t.name, '')) LIKE ?
+              AND IFNULL(t.pending, 0) = 0
+        """, (f"%{merchant_key}%",)).fetchall()]
+
+        for tx_id in tx_ids:
+            conn.execute("""
+                INSERT INTO transaction_classifications
+                (transaction_id, user_category, exclude_from_spend, merchant_normalized, updated_at)
+                VALUES (?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(transaction_id) DO UPDATE SET
+                    user_category      = excluded.user_category,
+                    exclude_from_spend = excluded.exclude_from_spend,
+                    merchant_normalized= excluded.merchant_normalized,
+                    updated_at         = excluded.updated_at
+            """, (tx_id, category, 1 if exclude else 0, merchant_key))
+        updated = len(tx_ids)
+
+        if create_rule and merchant_key:
+            cur = conn.execute("""
+                INSERT INTO classification_rules
+                (enabled, priority, match_field, match_op, match_value,
+                 user_category, exclude_from_spend, created_at, updated_at)
+                VALUES (1, 100, 'merchant_normalized', 'contains', ?, ?, ?, datetime('now'), datetime('now'))
+            """, (merchant_key, category, 1 if exclude else 0))
+            rule_id = cur.lastrowid
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({"ok": True, "updated": updated, "rule_id": rule_id})
+
+
 @reports_bp.route("/api/debug_state")
 @login_required
 def api_debug_state():
@@ -2628,3 +3613,557 @@ def api_debug_state():
 #         pw.append(random.choice(pool))
 #     random.shuffle(pw)
 #     return jsonify({"password": "".join(pw[:length])})
+
+
+# ===================================================================
+# Savings Goals
+# -------------------------------------------------------------------
+# Tracks progress toward a year-end savings target by measuring the
+# real balance growth of savings-subtype depository accounts. A goal
+# snapshots the total savings balance at creation (start_balance);
+# progress = current total savings - start_balance.
+# ===================================================================
+
+def _ensure_savings_goals_table(conn) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS savings_goals (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            name           TEXT NOT NULL,
+            target_amount  REAL NOT NULL,
+            start_date     TEXT NOT NULL,
+            end_date       TEXT NOT NULL,
+            start_balance  REAL NOT NULL,
+            status         TEXT DEFAULT 'active',
+            achieved_at    TEXT,
+            created_at     TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+
+
+def _goals_connect():
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _savings_accounts(conn):
+    """All savings-subtype depository accounts with a known current balance."""
+    return conn.execute("""
+        SELECT account_id, name, current
+        FROM accounts
+        WHERE type = 'depository' AND subtype = 'savings'
+          AND current IS NOT NULL
+    """).fetchall()
+
+
+def _total_savings_now(conn) -> float:
+    return round(sum(float(r["current"]) for r in _savings_accounts(conn)), 2)
+
+
+def _savings_balance_series(conn, start: date, end: date):
+    """
+    Reconstruct the total savings balance (summed across all savings
+    accounts) for each day in [start, end]. Same technique as
+    /api/account_history: balance_on_d = current - (txns dated after d).
+    Returns a list of (YYYY-MM-DD, balance) tuples.
+    """
+    accts = _savings_accounts(conn)
+    days = []
+    d = start
+    while d <= end:
+        days.append(d.isoformat())
+        d += timedelta(days=1)
+
+    series = {ds: 0.0 for ds in days}
+    for acct in accts:
+        rows = conn.execute("""
+            SELECT date, SUM(amount) AS day_amt
+            FROM transactions
+            WHERE account_id = ? AND IFNULL(pending, 0) = 0
+            GROUP BY date ORDER BY date ASC
+        """, (acct["account_id"],)).fetchall()
+        daily = {r["date"]: float(r["day_amt"]) for r in rows}
+        all_dates_sorted = sorted(daily.keys())
+        total_all = sum(daily.values())
+        current_bal = float(acct["current"])
+
+        running = 0.0
+        for ds in all_dates_sorted:
+            if date.fromisoformat(ds) < start:
+                running += daily[ds]
+            else:
+                break
+
+        for ds in days:
+            if ds in daily:
+                running += daily[ds]
+            series[ds] += current_bal - (total_all - running)
+
+    return [(ds, round(series[ds], 2)) for ds in days]
+
+
+def _savings_balance_on(conn, on_day: date) -> float:
+    """Total savings balance reconstructed for a single past date."""
+    ser = _savings_balance_series(conn, on_day, on_day)
+    return ser[0][1] if ser else _total_savings_now(conn)
+
+
+def _round_nice(amount: float, step: int = 50) -> int:
+    """Round to the nearest tidy figure for a friendly goal number."""
+    if amount <= 0:
+        return 0
+    return int(round(amount / step) * step)
+
+
+def _year_end(today: date) -> date:
+    return date(today.year, 12, 31)
+
+
+def _months_between(a: date, b: date) -> float:
+    """Approximate whole+fractional months from a to b (>= a)."""
+    if b <= a:
+        return 0.0
+    return max((b - a).days / 30.44, 0.0)
+
+
+def _compute_goal_stats(goal, current_total: float) -> dict:
+    """Live progress + pacing for one goal row."""
+    today      = date.today()
+    start_dt   = date.fromisoformat(goal["start_date"])
+    end_dt     = date.fromisoformat(goal["end_date"])
+    target     = float(goal["target_amount"])
+    start_bal  = float(goal["start_balance"])
+
+    progress   = round(current_total - start_bal, 2)
+    pct        = round(100.0 * progress / target, 1) if target > 0 else 0.0
+
+    days_total   = max((end_dt - start_dt).days, 1)
+    days_elapsed = min(max((today - start_dt).days, 0), days_total)
+    # Linear "should be here by now" target line.
+    expected     = round(target * days_elapsed / days_total, 2)
+    on_track     = progress >= expected
+
+    # Projection: extend current pace to the deadline.
+    pace_per_day = progress / days_elapsed if days_elapsed > 0 else 0.0
+    projected    = round(pace_per_day * days_total, 2)
+
+    months_left  = _months_between(today, end_dt)
+    remaining    = max(target - progress, 0.0)
+    need_monthly = round(remaining / months_left, 2) if months_left > 0 else remaining
+
+    achieved = progress >= target or goal["status"] == "achieved"
+
+    return {
+        "id":            goal["id"],
+        "name":          goal["name"],
+        "target_amount": round(target, 2),
+        "start_date":    goal["start_date"],
+        "end_date":      goal["end_date"],
+        "start_balance": round(start_bal, 2),
+        "current_total": round(current_total, 2),
+        "progress":      progress,
+        "pct":           max(min(pct, 999), -999),
+        "expected":      expected,
+        "on_track":      bool(on_track),
+        "projected_eoy": projected,
+        "need_monthly":  need_monthly,
+        "days_elapsed":  days_elapsed,
+        "days_total":    days_total,
+        "achieved":      bool(achieved),
+        "status":        "achieved" if achieved else goal["status"],
+    }
+
+
+@reports_bp.route("/goals")
+@login_required
+def goals_page():
+    return render_template("goals.html")
+
+
+@reports_bp.route("/api/goals/suggest")
+@login_required
+def api_goals_suggest():
+    """
+    Propose an attainable year-end savings target by measuring the
+    user's real savings growth over a recent lookback window and
+    extrapolating a conservative fraction to the deadline.
+    """
+    today    = date.today()
+    end_dt   = _year_end(today)
+    lookback = max(int(request.args.get("lookback_days", "90")), 30)
+
+    conn = _goals_connect()
+    try:
+        current_total = _total_savings_now(conn)
+        past_day      = today - timedelta(days=lookback)
+        past_total    = _savings_balance_on(conn, past_day)
+    finally:
+        conn.close()
+
+    grew         = current_total - past_total
+    months_obs   = max(lookback / 30.44, 0.5)
+    pace_monthly = grew / months_obs                       # observed $/month
+    months_left  = max(_months_between(today, end_dt), 0.5)
+
+    # Conservative "starter" = 60% of observed pace; stretch = full pace.
+    starter_raw = max(pace_monthly, 0.0) * months_left * 0.60
+    stretch_raw = max(pace_monthly, 0.0) * months_left
+
+    # Floors so there is always a small, attainable goal to start from.
+    starter = max(_round_nice(starter_raw, 50), 250)
+    stretch = max(_round_nice(stretch_raw, 100), starter + 250)
+
+    if pace_monthly <= 0:
+        note = ("Your savings balance hasn't grown over the last "
+                f"{lookback} days, so we're starting with a small, fixed target. "
+                "Hit it and we'll raise the bar.")
+    else:
+        note = (f"Over the last {lookback} days your savings grew about "
+                f"${grew:,.0f} (~${pace_monthly:,.0f}/mo). "
+                f"With ~{months_left:.1f} months left this year, this starter "
+                "target is well within reach.")
+
+    return jsonify({
+        "suggested":      starter,
+        "stretch":        stretch,
+        "current_total":  current_total,
+        "pace_monthly":   round(pace_monthly, 2),
+        "observed_growth": round(grew, 2),
+        "lookback_days":  lookback,
+        "months_left":    round(months_left, 1),
+        "end_date":       end_dt.isoformat(),
+        "note":           note,
+    })
+
+
+@reports_bp.route("/api/goals", methods=["GET", "POST"])
+@login_required
+def api_goals():
+    conn = _goals_connect()
+    try:
+        _ensure_savings_goals_table(conn)
+
+        if request.method == "POST":
+            body   = request.get_json(silent=True) or {}
+            name   = (body.get("name") or "Year-End Savings").strip()[:80]
+            try:
+                target = float(body.get("target_amount"))
+            except (TypeError, ValueError):
+                return jsonify({"error": "target_amount must be a number"}), 400
+            if target <= 0:
+                return jsonify({"error": "target_amount must be positive"}), 400
+
+            today      = date.today()
+            start_date = (body.get("start_date") or today.isoformat())[:10]
+            end_date   = (body.get("end_date") or _year_end(today).isoformat())[:10]
+            start_bal  = _total_savings_now(conn)
+
+            cur = conn.execute("""
+                INSERT INTO savings_goals
+                    (name, target_amount, start_date, end_date, start_balance, status)
+                VALUES (?, ?, ?, ?, ?, 'active')
+            """, (name, target, start_date, end_date, start_bal))
+            conn.commit()
+            new_id = cur.lastrowid
+            goal = conn.execute("SELECT * FROM savings_goals WHERE id=?", (new_id,)).fetchone()
+            return jsonify(_compute_goal_stats(goal, _total_savings_now(conn))), 201
+
+        # GET — list all goals with live stats
+        current_total = _total_savings_now(conn)
+        rows = conn.execute(
+            "SELECT * FROM savings_goals ORDER BY "
+            "CASE status WHEN 'active' THEN 0 WHEN 'achieved' THEN 1 ELSE 2 END, id DESC"
+        ).fetchall()
+        goals = [_compute_goal_stats(r, current_total) for r in rows]
+    finally:
+        conn.close()
+
+    return jsonify({"current_total": current_total, "goals": goals})
+
+
+@reports_bp.route("/api/goals/<int:goal_id>", methods=["DELETE"])
+@login_required
+def api_goal_delete(goal_id):
+    conn = _goals_connect()
+    try:
+        _ensure_savings_goals_table(conn)
+        conn.execute("DELETE FROM savings_goals WHERE id=?", (goal_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@reports_bp.route("/api/goals/<int:goal_id>/achieve", methods=["POST"])
+@login_required
+def api_goal_achieve(goal_id):
+    conn = _goals_connect()
+    try:
+        _ensure_savings_goals_table(conn)
+        conn.execute(
+            "UPDATE savings_goals SET status='achieved', achieved_at=CURRENT_TIMESTAMP WHERE id=?",
+            (goal_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@reports_bp.route("/api/goals/<int:goal_id>/series")
+@login_required
+def api_goal_series(goal_id):
+    """Actual saved-so-far series vs. the linear target line, for charting."""
+    conn = _goals_connect()
+    try:
+        _ensure_savings_goals_table(conn)
+        goal = conn.execute("SELECT * FROM savings_goals WHERE id=?", (goal_id,)).fetchone()
+        if not goal:
+            return jsonify({"error": "goal not found"}), 404
+
+        start_dt = date.fromisoformat(goal["start_date"])
+        end_dt   = date.fromisoformat(goal["end_date"])
+        today    = date.today()
+        start_bal = float(goal["start_balance"])
+        target    = float(goal["target_amount"])
+
+        # Actual progress only up to today (no future balances to reconstruct).
+        actual_end = min(today, end_dt)
+        series = _savings_balance_series(conn, start_dt, actual_end) if actual_end >= start_dt else []
+    finally:
+        conn.close()
+
+    actual = [{"date": ds, "saved": round(bal - start_bal, 2)} for ds, bal in series]
+
+    target_line = [
+        {"date": start_dt.isoformat(), "target": 0.0},
+        {"date": end_dt.isoformat(),   "target": round(target, 2)},
+    ]
+    return jsonify({
+        "name":        goal["name"],
+        "start_date":  goal["start_date"],
+        "end_date":    goal["end_date"],
+        "target":      round(target, 2),
+        "actual":      actual,
+        "target_line": target_line,
+    })
+
+
+# ===================================================================
+# Budget Framework
+# -------------------------------------------------------------------
+# A needs-based, tiered (Need / Want / Savings) budget layered on the
+# existing category taxonomy. Targets are set manually; actuals and a
+# 3-month reference average are derived from transactions so the user
+# can budget against reality. Savings goals plug into the Savings tier.
+# ===================================================================
+
+_BUDGET_TIERS = ("need", "want", "savings")
+
+# Default tier guess for known categories (user can override any of these).
+_DEFAULT_TIER = {
+    "Groceries": "need", "Utilities": "need", "Medical": "need",
+    "Transportation": "need", "Loan Payments": "need", "Government": "need",
+    "Bank Fees": "need", "Insurance": "need", "Housing": "need", "Rent": "need",
+    "Mortgage": "need", "Gas": "need", "Childcare": "need",
+    "Food & Drink": "want", "Shopping": "want", "Entertainment": "want",
+    "Personal Care": "want", "Travel": "want", "Subscriptions": "want",
+    "Home Improvement": "want", "Dining": "want", "Pet": "want", "Services": "want",
+    "Savings": "savings", "Investment": "savings",
+}
+
+# Categories that are transfers/income, not budgetable spend.
+_BUDGET_SKIP_CATS = {
+    "income", "transfer in", "transfer out", "savings", "investment",
+}
+
+
+def _budget_tier_for(category: str) -> str:
+    return _DEFAULT_TIER.get(category, "want")
+
+
+def _budget_settings_get(conn, key, default=None):
+    row = conn.execute("SELECT value FROM budget_settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def _ensure_budget_tables(conn) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS budget_plan (
+            category      TEXT PRIMARY KEY,
+            tier          TEXT NOT NULL DEFAULT 'need',
+            target_amount REAL NOT NULL DEFAULT 0,
+            sort_order    INTEGER DEFAULT 100,
+            updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS budget_settings (
+            key        TEXT PRIMARY KEY,
+            value      TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+
+
+def _budget_actuals_by_category(months_back: int = 0, month_key: "str | None" = None):
+    """
+    Returns (expense_by_cat: dict, income_total: float) for a single month
+    (month_key 'YYYY-MM') or, when month_key is None, for the month that is
+    `months_back` months before the current month.
+    Expense excludes income/savings/investment/transfer rows.
+    """
+    df = _load_tx_detail()
+    if df.empty or "date" not in df.columns:
+        return {}, 0.0
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    df["month"] = df["date"].dt.to_period("M").astype(str)
+
+    if month_key is None:
+        anchor = (pd.Timestamp(date.today().replace(day=1)) -
+                  pd.DateOffset(months=months_back))
+        month_key = anchor.strftime("%Y-%m")
+    sub = df[df["month"] == month_key]
+    if sub.empty:
+        return {}, 0.0
+
+    income_total = float(sub.loc[sub["spending_type"] == "income", "amount"].abs().sum())
+
+    exp = sub[sub["spending_type"] == "expense"].copy()
+    exp = exp[exp["exclude_from_spend"] == 0]
+    by_cat = exp.groupby("category")["amount"].apply(lambda s: float(s.abs().sum()))
+    return {str(k): round(v, 2) for k, v in by_cat.items()}, round(income_total, 2)
+
+
+def _budget_reference_avg(n_months: int = 3):
+    """Average monthly expense per category over the last n complete-ish months."""
+    totals: dict[str, float] = {}
+    for mb in range(1, n_months + 1):
+        cats, _ = _budget_actuals_by_category(months_back=mb)
+        for c, v in cats.items():
+            totals[c] = totals.get(c, 0.0) + v
+    return {c: round(v / n_months, 2) for c, v in totals.items()}
+
+
+@reports_bp.route("/budget")
+@login_required
+def budget_page():
+    return render_template("budget.html")
+
+
+@reports_bp.route("/api/budget_plan", methods=["GET", "POST"])
+@login_required
+def api_budget_plan():
+    conn = _goals_connect()
+    try:
+        _ensure_budget_tables(conn)
+
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            if "expected_income" in body:
+                conn.execute(
+                    "INSERT INTO budget_settings (key, value) VALUES ('expected_income', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+                    (str(float(body.get("expected_income") or 0)),),
+                )
+            for it in body.get("categories", []):
+                cat = (it.get("category") or "").strip()
+                if not cat:
+                    continue
+                tier = (it.get("tier") or "want").lower()
+                if tier not in _BUDGET_TIERS:
+                    tier = "want"
+                target = float(it.get("target_amount") or 0)
+                conn.execute(
+                    "INSERT INTO budget_plan (category, tier, target_amount) VALUES (?,?,?) "
+                    "ON CONFLICT(category) DO UPDATE SET "
+                    "  tier=excluded.tier, target_amount=excluded.target_amount, "
+                    "  updated_at=CURRENT_TIMESTAMP",
+                    (cat, tier, target),
+                )
+            conn.commit()
+            return jsonify({"status": "ok"})
+
+        # ---- GET ----
+        month = request.args.get("month") or _month_key(date.today())
+        actuals, income_actual = _budget_actuals_by_category(month_key=month)
+        ref_avg = _budget_reference_avg(3)
+
+        saved_rows = {
+            r["category"]: r for r in
+            conn.execute("SELECT category, tier, target_amount FROM budget_plan").fetchall()
+        }
+        expected_income = float(_budget_settings_get(conn, "expected_income", 0) or 0)
+
+        # Active savings-goal monthly requirement feeds the Savings tier.
+        goal_need = 0.0
+        goal_name = None
+        try:
+            _ensure_savings_goals_table(conn)
+            g = conn.execute(
+                "SELECT * FROM savings_goals WHERE status='active' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if g:
+                stats = _compute_goal_stats(g, _total_savings_now(conn))
+                goal_need = stats["need_monthly"]
+                goal_name = stats["name"]
+        except Exception:
+            pass
+
+        # Union of categories: saved plan + observed actuals + reference, minus skips.
+        all_cats = set(saved_rows) | set(actuals) | set(ref_avg)
+        all_cats = {c for c in all_cats if c and c.lower() not in _BUDGET_SKIP_CATS}
+
+        categories = []
+        for cat in sorted(all_cats):
+            saved = saved_rows.get(cat)
+            categories.append({
+                "category": cat,
+                "tier":     (saved["tier"] if saved else _budget_tier_for(cat)),
+                "target":   round(float(saved["target_amount"]), 2) if saved else 0.0,
+                "actual":   round(actuals.get(cat, 0.0), 2),
+                "ref_avg":  round(ref_avg.get(cat, 0.0), 2),
+                "saved":    bool(saved),
+            })
+
+        # Tier rollups (savings tier target includes the goal requirement).
+        tiers = {t: {"target": 0.0, "actual": 0.0} for t in _BUDGET_TIERS}
+        for c in categories:
+            tiers[c["tier"]]["target"] += c["target"]
+            tiers[c["tier"]]["actual"] += c["actual"]
+        tiers["savings"]["target"] += goal_need
+
+        base_income = expected_income or income_actual or 0.0
+        for t in _BUDGET_TIERS:
+            tiers[t]["target"] = round(tiers[t]["target"], 2)
+            tiers[t]["actual"] = round(tiers[t]["actual"], 2)
+            tiers[t]["target_pct"] = round(100 * tiers[t]["target"] / base_income, 1) if base_income else 0.0
+            tiers[t]["actual_pct"] = round(100 * tiers[t]["actual"] / base_income, 1) if base_income else 0.0
+
+        planned_total = round(sum(tiers[t]["target"] for t in _BUDGET_TIERS), 2)
+        actual_total  = round(sum(tiers[t]["actual"] for t in _BUDGET_TIERS), 2)
+
+        return jsonify({
+            "month": month,
+            "income": {
+                "expected": round(expected_income, 2),
+                "actual":   round(income_actual, 2),
+                "base":     round(base_income, 2),
+            },
+            "categories": categories,
+            "tiers": tiers,
+            "guardrails": {"need": 50, "want": 30, "savings": 20},
+            "planned_total":     planned_total,
+            "actual_total":      actual_total,
+            "planned_surplus":   round(base_income - planned_total, 2),
+            "actual_surplus":    round(base_income - actual_total, 2),
+            "goal": {"need_monthly": round(goal_need, 2), "name": goal_name},
+        })
+    finally:
+        conn.close()

@@ -4,14 +4,15 @@
     <meta charset="utf-8">
     <title>Analysis Reports</title>
     <style>
+      *, *::before, *::after { box-sizing: border-box; }
       body { font-family: system-ui, sans-serif; margin: 2rem; background: #f8f9fa; }
-      h1 { color: #333; margin-bottom: .25rem; }
+      h1 { color: #1a1a2e; margin-bottom: .25rem; }
       a { color: #0078d7; text-decoration: none; }
       a:hover { text-decoration: underline; }
 
-      #controls { margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem; }
+      #controls { margin-top: 1.5rem; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
       #controls label { font-weight: 600; }
-      select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 6px; }
+      select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 6px; font-size: .92rem; }
       .small { font-size: .9rem; color: #666; }
 
       #cards { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1.25rem; }
@@ -26,56 +27,46 @@
       .card p.negative { color: #c33; }
 
       #charts { margin-top: 2rem; }
-      .chart { margin-bottom: 2.5rem; background: #fff; border-radius: 8px; box-shadow: 0 0 4px rgba(0,0,0,.07); padding: .5rem; min-height: 400px; }
+      .chart-row { display: grid; gap: 1.25rem; margin-bottom: 1.25rem; }
+      .chart-row.cols-2 { grid-template-columns: 1fr 1fr; }
+      .chart-row.cols-1 { grid-template-columns: 1fr; }
+      @media (max-width: 900px) { .chart-row.cols-2 { grid-template-columns: 1fr; } }
 
-      /* Calendar */
-      .panel { background:#fff; padding:1rem 1.25rem; border-radius:8px; box-shadow:0 0 4px rgba(0,0,0,.07); margin-top:2rem; }
-      .panel h2 { margin-top:0; }
-      button { padding:.4rem .7rem; background:#0078d7; color:#fff; border:none; border-radius:6px; cursor:pointer; }
-      button:hover { background:#005fa3; }
-      .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-top:.5rem; }
-      .cal-hdr  { text-align:center; font-size:.8rem; font-weight:700; color:#666; padding:.35rem 0; background:#f1f3f4; border-radius:4px; }
-      .cal-cell { min-height:90px; border:1px solid #eee; border-radius:4px; padding:.3rem .4rem; font-size:.78rem; }
-      .cal-cell.today { background:#fffbe6; border-color:#ffe58f; }
-      .cal-cell.other-month { background:#fafafa; }
-      .cal-day-num { font-weight:700; margin-bottom:.25rem; color:#333; }
-      .badge { display:inline-block; border-radius:4px; padding:.08rem .35rem; font-size:.72rem; font-weight:600; margin:.1rem .1rem 0 0; white-space:nowrap; overflow:hidden; max-width:100%; text-overflow:ellipsis; }
-      .badge.pay        { background:#d4edda; color:#155724; }
-      .badge.income-fix { background:#a8d8a8; color:#1a4731; }
-      .badge.xfer       { background:#cce5ff; color:#004085; }
-      .badge.bill-auto  { background:#fff3cd; color:#856404; }
-      .badge.bill-man   { background:#f8d7da; color:#721c24; }
-      .badge.cash-out   { background:#e2e3e5; color:#383d41; }
-      .badge.cash-in    { background:#d1ecf1; color:#0c5460; }
-      .badge.done { opacity:.55; }
-      .cal-legend { margin-top:.75rem; display:flex; gap:1rem; flex-wrap:wrap; font-size:.85rem; }
-
-      /* Amount override modal */
-      .modal-backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; align-items:center; justify-content:center; }
-      .modal-backdrop.open { display:flex; }
-      .modal { background:#fff; border-radius:10px; padding:1.5rem; width:420px; max-width:95vw; max-height:85vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,.2); }
-      .modal h3 { margin:0 0 1rem; }
-      .modal h4 { margin:.75rem 0 .4rem; font-size:.85rem; text-transform:uppercase; letter-spacing:.05em; color:#666; border-bottom:1px solid #eee; padding-bottom:.25rem; }
-      .amount-row { display:flex; align-items:center; justify-content:space-between; margin:.35rem 0; gap:.5rem; }
-      .amount-row label { font-size:.9rem; flex:1; }
-      .amount-row input { width:110px; padding:.3rem .4rem; border:1px solid #ccc; border-radius:5px; font-size:.9rem; text-align:right; }
-      .modal-actions { display:flex; justify-content:flex-end; gap:.5rem; margin-top:1rem; }
-      .btn-secondary { background:#6c757d; }
-      .btn-secondary:hover { background:#545b62; }
+      .chart-card {
+        background: #fff; border-radius: 10px;
+        box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: .5rem;
+        min-height: 360px;
+      }
     </style>
     <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   </head>
   <body>
     <h1>Analysis Reports</h1>
-    <p><a href="/">← Back to Home</a> &nbsp;|&nbsp; <a href="/reports/monthly">Monthly Cashflow →</a> &nbsp;|&nbsp; <a href="/reports/paycalendar">Pay-Period Calendar →</a> &nbsp;|&nbsp; <a href="/reports/reconcile">Statement Reconciliation →</a></p>
+    <p>
+      <a href="/">← Back to Home</a> &nbsp;|&nbsp;
+      <a href="/reports/budget">Budget →</a> &nbsp;|&nbsp;
+      <a href="/reports/goals">Savings Goals →</a> &nbsp;|&nbsp;
+      <a href="/reports/paycalendar">Pay-Period Calendar →</a> &nbsp;|&nbsp;
+      <a href="/reports/monthly">Monthly Cashflow →</a> &nbsp;|&nbsp;
+      <a href="/reports/transactions">Transactions →</a> &nbsp;|&nbsp;
+      <a href="/reports/merchants">Merchants →</a> &nbsp;|&nbsp;
+      <a href="/reports/reconcile">Statement Reconciliation →</a>
+    </p>
 
     <div id="controls">
       <label for="range">Time Range:</label>
-      <select id="range">
+      <select id="range" onchange="onRangeChange()">
         <option value="30d">Last 30 Days</option>
         <option value="ytd" selected>Year-to-Date</option>
         <option value="12m">Last 12 Months</option>
+        <option value="custom">Custom…</option>
       </select>
+      <span id="custom-dates" style="display:none; align-items:center; gap:.4rem;">
+        <input type="date" id="range-start" style="padding:.35rem .5rem; border:1px solid #ccc; border-radius:6px; font-size:.9rem;">
+        <span style="color:#666;">to</span>
+        <input type="date" id="range-end"   style="padding:.35rem .5rem; border:1px solid #ccc; border-radius:6px; font-size:.9rem;">
+        <button onclick="loadAll()" style="padding:.35rem .7rem; background:#0078d7; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:.9rem;">Apply</button>
+      </span>
       <span id="status" class="small"></span>
     </div>
 
@@ -87,269 +78,309 @@
       <div class="card"><h3>Avg Transaction</h3><p id="card-avg">–</p></div>
     </div>
 
-    <div class="panel" id="cal-panel">
-      <h2>Schedule Calendar</h2>
-      <div style="display:flex; gap:.75rem; align-items:center; flex-wrap:wrap;">
-        <button onclick="shiftCal(-1)">&#8592; Prev</button>
-        <strong id="cal-month-label" style="min-width:160px; text-align:center;"></strong>
-        <button onclick="shiftCal(1)">Next &#8594;</button>
-        <button onclick="openAmountsModal()" style="margin-left:auto; background:#6c757d;">Edit Amounts</button>
-      </div>
-      <div id="cal-grid" class="cal-grid"></div>
-      <div class="cal-legend">
-        <span><span class="badge pay">Payday</span> Payday</span>
-        <span><span class="badge income-fix">Income</span> Fixed monthly income</span>
-        <span><span class="badge xfer">Xfer</span> Transfer</span>
-        <span><span class="badge bill-auto">Bill</span> Bill — auto pay</span>
-        <span><span class="badge bill-man">Bill</span> Bill — manual pay</span>
-        <span><span class="badge cash-out">←</span> Other cash out</span>
-        <span><span class="badge cash-in">→</span> Other cash in</span>
-      </div>
-    </div>
-
-    <!-- Amount override modal -->
-    <div class="modal-backdrop" id="amounts-modal">
-      <div class="modal">
-        <h3>Set Amounts — <span id="amounts-modal-month"></span></h3>
-        <p style="font-size:.85rem; color:#666; margin-top:-.5rem;">Enter known amounts for this month's bills and transfers. Leave blank to use the default. Changes apply to this month only.</p>
-        <div id="amounts-income-section">
-          <h4>Monthly Income</h4>
-          <div id="amounts-income"></div>
-        </div>
-        <div id="amounts-bills-section">
-          <h4>Bills</h4>
-          <div id="amounts-bills"></div>
-        </div>
-        <div id="amounts-transfers-section">
-          <h4>Transfers</h4>
-          <div id="amounts-transfers"></div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="closeAmountsModal()">Cancel</button>
-          <button onclick="saveAmounts()">Save</button>
-        </div>
-      </div>
-    </div>
-
     <div id="charts">
-      <div id="chart-monthly" class="chart"></div>
-      <div id="chart-category" class="chart"></div>
-      <div id="chart-merchants" class="chart"></div>
+      <!-- Row 1: Monthly Cashflow + Expense/Savings/Investment breakdown -->
+      <div class="chart-row cols-2">
+        <div class="chart-card" id="chart-cashflow"></div>
+        <div class="chart-card" id="chart-cashflow-breakdown"></div>
+      </div>
+      <!-- Row 2: Category donut + Spending trend -->
+      <div class="chart-row cols-2">
+        <div class="chart-card" id="chart-category"></div>
+        <div class="chart-card" id="chart-trend"></div>
+      </div>
+      <!-- Row 3: Account balances (full width) -->
+      <div class="chart-row cols-1">
+        <div class="chart-card" id="chart-accounts"></div>
+      </div>
+      <!-- Row 4: Top merchants (full width) -->
+      <div class="chart-row cols-1">
+        <div class="chart-card" id="chart-merchants"></div>
+      </div>
     </div>
 
     <p><a href="/">← Back to Home</a></p>
 
     <script>
     const REFRESH_MS = 120000;
-    let refreshTimer;
+    const $ = id => document.getElementById(id);
+
+    // Consistent category colour palette (Plotly Safe colorway)
+    const CAT_COLORS = [
+      '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+      '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'
+    ];
+
+    function money(n) { return '$' + Number(n||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+    function fmt(n)   { return '$' + Number(n||0).toFixed(2); }
+
+    const plotCfg = { responsive: true, displayModeBar: false };
+    const baseLayout = {
+      margin: { t: 50, b: 40, l: 60, r: 20 },
+      font:   { family: 'system-ui, sans-serif', size: 12 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor:  'rgba(0,0,0,0)',
+    };
+
+    function buildRangeQS() {
+      const range = $('range').value;
+      if (range === 'custom') {
+        const s = $('range-start').value, e = $('range-end').value;
+        return (s && e) ? `start=${s}&end=${e}` : '';
+      }
+      return 'range=' + range;
+    }
+
+    function onRangeChange() {
+      const isCustom = $('range').value === 'custom';
+      $('custom-dates').style.display = isCustom ? 'inline-flex' : 'none';
+      if (!isCustom) loadAll();
+    }
 
     async function fetchJSON(url) {
       const r = await fetch(url);
+      if (!r.ok) throw new Error(await r.text());
       return r.json();
     }
 
-    function fmt(n) { return '$' + Number(n || 0).toFixed(2); }
+    const MONTH_NAMES = ['January','February','March','April','May','June',
+                         'July','August','September','October','November','December'];
+    function monthLabel(ym) {
+      const mn = parseInt((ym || '').split('-')[1], 10);
+      return MONTH_NAMES[mn - 1] || ym;
+    }
 
+    // ── Chart 1: Monthly Cashflow (income vs total outflow + net) ───────────
+    function drawCashflow(trend) {
+      if (!Array.isArray(trend) || !trend.length) return;
+      const labels  = trend.map(r => monthLabel(r.month));
+      const income  = trend.map(r => r.inflow   || 0);
+      const outflow = trend.map(r => r.outflow  || 0);
+      const net     = trend.map(r => r.net      || 0);
+
+      Plotly.newPlot('chart-cashflow', [
+        { x: labels, y: income,  name: 'Income',  type: 'bar', marker: { color: '#27ae60' } },
+        { x: labels, y: outflow, name: 'Outflow', type: 'bar', marker: { color: '#e74c3c' } },
+        { x: labels, y: net, name: 'Net',
+          type: 'scatter', mode: 'lines+markers',
+          line: { color: '#2980b9', width: 2.5 },
+          marker: { color: '#2980b9', size: 7 },
+        },
+      ], {
+        ...baseLayout,
+        title: { text: 'Monthly Cashflow (Checking)', font: { size: 14 } },
+        barmode: 'group',
+        legend: { orientation: 'h', y: -0.18 },
+        yaxis: { tickprefix: '$', tickformat: ',.0f', gridcolor: '#eee' },
+        xaxis: { gridcolor: '#eee' },
+      }, plotCfg);
+    }
+
+    // ── Chart 1b: Outflow breakdown — Expense / Savings / Investment ─────────
+    function drawCashflowBreakdown(trend) {
+      if (!Array.isArray(trend) || !trend.length) return;
+      const labels     = trend.map(r => monthLabel(r.month));
+      const expense    = trend.map(r => r.expense    || 0);
+      const savings    = trend.map(r => r.savings    || 0);
+      const investment = trend.map(r => r.investment || 0);
+
+      Plotly.newPlot('chart-cashflow-breakdown', [
+        { x: labels, y: expense,    name: 'Expense',    type: 'bar', marker: { color: '#e74c3c' } },
+        { x: labels, y: savings,    name: 'Savings',    type: 'bar', marker: { color: '#f39c12' } },
+        { x: labels, y: investment, name: 'Investment', type: 'bar', marker: { color: '#8e44ad' } },
+      ], {
+        ...baseLayout,
+        title: { text: 'Outflow Breakdown (Checking)', font: { size: 14 } },
+        barmode: 'stack',
+        legend: { orientation: 'h', y: -0.18 },
+        yaxis: { tickprefix: '$', tickformat: ',.0f', gridcolor: '#eee' },
+        xaxis: { gridcolor: '#eee' },
+      }, plotCfg);
+    }
+
+    // ── Chart 2: Spending by Category — donut ───────────────────────────────
+    function drawCategory(catData) {
+      if (!catData || catData.error) return;
+      const entries = Object.entries(catData).sort((a, b) => b[1] - a[1]).slice(0, 12);
+      const labels  = entries.map(e => e[0]);
+      const values  = entries.map(e => e[1]);
+      const total   = values.reduce((s, v) => s + v, 0);
+
+      Plotly.newPlot('chart-category', [{
+        values, labels,
+        type: 'pie', hole: 0.48,
+        textinfo: 'percent',
+        textposition: 'inside',
+        insidetextorientation: 'radial',
+        marker: { colors: CAT_COLORS },
+        hovertemplate: '<b>%{label}</b><br>%{value:$,.2f}<br>%{percent}<extra></extra>',
+      }], {
+        ...baseLayout,
+        margin: { t: 50, b: 20, l: 10, r: 10 },
+        title: { text: `Spending by Category<br><sub>Total: ${money(total)}</sub>`, font: { size: 14 } },
+        legend: { orientation: 'v', x: 1.02, y: 0.5, font: { size: 11 } },
+        showlegend: true,
+      }, plotCfg);
+    }
+
+    // ── Chart 3: Category Spending Trend — line per category ─────────────────
+    function drawTrend(data) {
+      if (!data || !data.months || !data.months.length) return;
+      const traces = data.categories.map((cat, i) => ({
+        x: data.months,
+        y: data.series[cat] || [],
+        name: cat,
+        type: 'scatter',
+        mode: 'lines+markers',
+        line:   { color: CAT_COLORS[i % CAT_COLORS.length], width: 2 },
+        marker: { color: CAT_COLORS[i % CAT_COLORS.length], size: 5 },
+        hovertemplate: `<b>${cat}</b><br>%{x}: %{y:$,.2f}<extra></extra>`,
+      }));
+
+      Plotly.newPlot('chart-trend', traces, {
+        ...baseLayout,
+        margin: { t: 50, b: 40, l: 65, r: 20 },
+        title: { text: 'Spending Trend by Category', font: { size: 14 } },
+        legend: { orientation: 'h', y: -0.18 },
+        yaxis: { tickprefix: '$', tickformat: ',.0f', gridcolor: '#eee' },
+        xaxis: { gridcolor: '#eee' },
+      }, plotCfg);
+    }
+
+    // ── Chart 4: Account Balances Over Time ──────────────────────────────────
+    function drawAccounts(accounts) {
+      if (!Array.isArray(accounts) || !accounts.length) return;
+
+      // Colour pools: depository = blues/greens, credit = reds/oranges
+      const depColors = ['#2980b9','#27ae60','#16a085','#8e44ad','#2c3e50'];
+      const crdColors = ['#e74c3c','#e67e22','#c0392b','#d35400'];
+      let di = 0, ci = 0;
+
+      const traces = accounts.map(acct => {
+        const isCredit = acct.type === 'credit';
+        const color = isCredit ? crdColors[ci++ % crdColors.length] : depColors[di++ % depColors.length];
+        return {
+          x: acct.dates,
+          y: acct.balances,
+          name: `${acct.institution} ${acct.name}`,
+          type: 'scatter',
+          mode: 'lines',
+          line: { color, width: 2, dash: isCredit ? 'dot' : 'solid' },
+          hovertemplate: `<b>${acct.name}</b><br>%{x}: %{y:$,.2f}<extra></extra>`,
+          fill: (!isCredit && accounts.filter(a => a.type !== 'credit').length === 1) ? 'tozeroy' : 'none',
+          fillcolor: !isCredit ? color.replace(')', ',0.08)').replace('rgb', 'rgba') : undefined,
+        };
+      });
+
+      Plotly.newPlot('chart-accounts', traces, {
+        ...baseLayout,
+        margin: { t: 50, b: 40, l: 75, r: 20 },
+        title: { text: 'Account Balances Over Time<br><sub>Solid = depository  ·  Dotted = credit (balance owed)</sub>', font: { size: 14 } },
+        legend: { orientation: 'h', y: -0.2, font: { size: 11 } },
+        yaxis: { tickprefix: '$', tickformat: ',.0f', gridcolor: '#eee', zeroline: true, zerolinecolor: '#bbb' },
+        xaxis: { gridcolor: '#eee' },
+      }, plotCfg);
+    }
+
+    // ── Chart 5: Top Merchants — horizontal bar coloured by category ─────────
+    function drawMerchants(merchants) {
+      if (!Array.isArray(merchants) || !merchants.length) return;
+      const top  = merchants.slice(0, 20).reverse();  // Plotly h-bar: first = bottom
+      const cats = [...new Set(top.map(m => m.category || 'Other'))];
+      const palette = Object.fromEntries(cats.map((c, i) => [c, CAT_COLORS[i % CAT_COLORS.length]]));
+
+      const traces = cats.map(cat => {
+        const subset = top.filter(m => (m.category || 'Other') === cat);
+        return {
+          y: subset.map(m => m.merchant),
+          x: subset.map(m => m.amount),
+          name: cat,
+          type: 'bar',
+          orientation: 'h',
+          marker: { color: palette[cat] },
+          text: subset.map(m => `${money(m.amount)}  (${m.count}×)`),
+          textposition: 'outside',
+          cliponaxis: false,
+          hovertemplate: '<b>%{y}</b><br>%{x:$,.2f} · %{text}<extra></extra>',
+        };
+      });
+
+      Plotly.newPlot('chart-merchants', traces, {
+        ...baseLayout,
+        margin: { t: 50, b: 40, l: 180, r: 140 },
+        title: { text: 'Top Merchants by Spend', font: { size: 14 } },
+        barmode: 'stack',
+        legend: { orientation: 'v', x: 1.02, y: 1 },
+        xaxis: { tickprefix: '$', tickformat: ',.0f', gridcolor: '#eee' },
+        yaxis: { gridcolor: '#eee', automargin: true },
+        height: Math.max(360, top.length * 28 + 100),
+      }, plotCfg);
+    }
+
+    // ── KPI cards ────────────────────────────────────────────────────────────
+    function updateCards(split, kpi) {
+      if (split && !split.error) {
+        $('card-income').textContent   = fmt(split.income);
+        $('card-expenses').textContent = fmt(split.expenses);
+        const net = split.net_balance;
+        $('card-net').textContent  = fmt(net);
+        $('card-net').className    = net >= 0 ? 'positive' : 'negative';
+      }
+      if (kpi && !kpi.error) {
+        const mom = kpi.mom_pct;
+        $('card-mom').textContent = (mom >= 0 ? '+' : '') + mom.toFixed(1) + '%';
+        $('card-mom').className   = mom <= 0 ? 'positive' : 'negative';
+        $('card-avg').textContent = fmt(kpi.avg_txn);
+      }
+    }
+
+    // ── Main load ─────────────────────────────────────────────────────────────
     async function loadAll() {
-      const range = document.getElementById('range').value;
-      document.getElementById('status').textContent = 'Loading…';
+      const qs = buildRangeQS();
+      if (!qs) return;
+      $('status').textContent = 'Loading…';
 
       try {
-        const [split, kpi, catData, trend, merchants] = await Promise.all([
-          fetchJSON('/reports/api/income_expense_split?range=' + range),
-          fetchJSON('/reports/api/kpi_summary?range=' + range),
-          fetchJSON('/reports/api/spending_by_category?range=' + range),
-          fetchJSON('/reports/api/cashflow_summary?range=' + range),
-          fetchJSON('/reports/api/top_merchants?range=' + range),
+        const [split, kpi, catData, cashflow, merchants, trend, accounts] = await Promise.all([
+          fetchJSON('/reports/api/income_expense_split?' + qs),
+          fetchJSON('/reports/api/kpi_summary?' + qs),
+          fetchJSON('/reports/api/spending_by_category?' + qs),
+          fetchJSON('/reports/api/cashflow_summary?' + qs),
+          fetchJSON('/reports/api/top_merchants?' + qs),
+          fetchJSON('/reports/api/spending_trend?' + qs),
+          fetchJSON('/reports/api/account_history?' + qs),
         ]);
 
-        // --- KPI cards ---
-        if (!split.error) {
-          document.getElementById('card-income').textContent   = fmt(split.income);
-          document.getElementById('card-expenses').textContent = fmt(split.expenses);
-          const net = split.net_balance;
-          const netEl = document.getElementById('card-net');
-          netEl.textContent = fmt(net);
-          netEl.className = net >= 0 ? 'positive' : 'negative';
-        }
-        if (!kpi.error) {
-          const momEl = document.getElementById('card-mom');
-          const mom = kpi.mom_pct;
-          momEl.textContent = (mom >= 0 ? '+' : '') + mom.toFixed(1) + '%';
-          momEl.className = mom <= 0 ? 'positive' : 'negative';
-          document.getElementById('card-avg').textContent = fmt(kpi.avg_txn);
-        }
+        updateCards(split, kpi);
+        drawCashflow(Array.isArray(cashflow) ? cashflow : []);
+        drawCashflowBreakdown(Array.isArray(cashflow) ? cashflow : []);
+        drawCategory(catData);
+        drawTrend(trend);
+        drawAccounts(accounts);
+        drawMerchants(merchants);
 
-        // --- Monthly income vs expenses ---
-        if (Array.isArray(trend) && trend.length) {
-          Plotly.newPlot('chart-monthly', [
-            { x: trend.map(r => r.month), y: trend.map(r => r.inflow),  name: 'Income',   type: 'bar', marker: { color: '#2ca02c' } },
-            { x: trend.map(r => r.month), y: trend.map(r => r.outflow), name: 'Expenses', type: 'bar', marker: { color: '#d62728' } },
-          ], { title: 'Monthly Income vs Expenses', barmode: 'group', margin: { t: 50 }, height: 400 }, { responsive: true });
-        }
-
-        // --- Spending by category ---
-        if (!catData.error && Object.keys(catData).length) {
-          const cats = Object.entries(catData).sort((a, b) => b[1] - a[1]);
-          Plotly.newPlot('chart-category', [{
-            x: cats.map(c => c[0]),
-            y: cats.map(c => c[1]),
-            type: 'bar',
-            marker: { color: '#1f77b4' },
-          }], { title: 'Spending by Category', margin: { t: 50 }, height: 400 }, { responsive: true });
-        }
-
-        // --- Top merchants ---
-        if (Array.isArray(merchants) && merchants.length) {
-          const top = merchants.slice(0, 20);
-          Plotly.newPlot('chart-merchants', [{
-            x: top.map(r => r.amount),
-            y: top.map(r => r.merchant),
-            type: 'bar',
-            orientation: 'h',
-            marker: { color: '#ff7f0e' },
-          }], {
-            title: 'Top Merchants',
-            margin: { t: 50, l: 180 },
-            height: 550,
-            xaxis: { title: 'Total Spend ($)' },
-          }, { responsive: true });
-        }
-
-        document.getElementById('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+        $('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
       } catch (err) {
         console.error(err);
-        document.getElementById('status').textContent = 'Error loading data';
+        $('status').textContent = 'Error loading data';
       }
     }
-
-    // ── Calendar ─────────────────────────────────────────────────────────────
-    let calYear, calMonth;
-
-    function shiftCal(delta) {
-      calMonth += delta;
-      if (calMonth > 12) { calMonth = 1; calYear++; }
-      if (calMonth < 1)  { calMonth = 12; calYear--; }
-      loadCal();
-    }
-
-    async function loadCal() {
-      const monthStr = `${calYear}-${String(calMonth).padStart(2, '0')}`;
-      document.getElementById('cal-month-label').textContent =
-        new Date(calYear, calMonth - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-
-      const events = await fetchJSON('/reports/api/calendar_events?month=' + monthStr);
-      const byDate = {};
-      (events || []).forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
-
-      const firstDow   = new Date(calYear, calMonth - 1, 1).getDay();
-      const daysInMonth = new Date(calYear, calMonth, 0).getDate();
-      const todayStr   = new Date().toISOString().slice(0, 10);
-      const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-      let html = dow.map(d => `<div class="cal-hdr">${d}</div>`).join('');
-      for (let i = 0; i < firstDow; i++) html += `<div class="cal-cell other-month"></div>`;
-
-      for (let day = 1; day <= daysInMonth; day++) {
-        const ds = `${calYear}-${String(calMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-        html += `<div class="cal-cell${ds === todayStr ? ' today' : ''}"><div class="cal-day-num">${day}</div>`;
-        (byDate[ds] || []).forEach(e => {
-          const fmtAmt = a => '$' + Number(a ?? 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-          const isEst  = e.amount_type === 'estimate';
-          const amtStr = ' ' + fmtAmt(e.amount) + (isEst ? '*' : '');
-          const done   = e.occurred ? ' done' : '';
-          const chk    = e.occurred ? '✓ ' : '';
-          const typeHint = {actual:'Actual', statement:'Statement bal.', estimate:'Estimated', static:'Manual'}[e.amount_type] || '';
-          if (e.type === 'payday')
-            html += `<span class="badge pay${done}" title="${typeHint}">${chk}Payday${amtStr}</span>`;
-          else if (e.type === 'transfer')
-            html += `<span class="badge xfer${done}" title="${typeHint}">${chk}${e.name}${amtStr}</span>`;
-          else if (e.type === 'income')
-            html += `<span class="badge income-fix${done}" title="${e.name} — ${typeHint}">${chk}${e.name}${amtStr}</span>`;
-          else if (e.type === 'bill')
-            html += `<span class="badge ${e.auto_pay ? 'bill-auto' : 'bill-man'}${done}" title="${e.name} — ${typeHint}">${chk}${e.name}${amtStr}</span>`;
-          else if (e.type === 'cash')
-            html += `<span class="badge ${e.direction === 'in' ? 'cash-in' : 'cash-out'}" title="${e.name}">✓ ${e.name}${amtStr}</span>`;
-        });
-        html += `</div>`;
-      }
-
-      const trailing = (7 - (firstDow + daysInMonth) % 7) % 7;
-      for (let i = 0; i < trailing; i++) html += `<div class="cal-cell other-month"></div>`;
-      document.getElementById('cal-grid').innerHTML = html;
-    }
-
-    // ── Amount override modal ────────────────────────────────────────────────
-    async function openAmountsModal() {
-      const monthStr = `${calYear}-${String(calMonth).padStart(2,'0')}`;
-      const label = new Date(calYear, calMonth-1, 1).toLocaleString('default', {month:'long', year:'numeric'});
-      document.getElementById('amounts-modal-month').textContent = label;
-
-      const data = await fetchJSON('/reports/api/schedule_amounts?month=' + monthStr);
-      const incomeEl = document.getElementById('amounts-income');
-      const billsEl  = document.getElementById('amounts-bills');
-      const xferEl   = document.getElementById('amounts-transfers');
-      incomeEl.innerHTML = '';
-      billsEl.innerHTML  = '';
-      xferEl.innerHTML   = '';
-
-      const makeRow = (name, current, container) => {
-        const row = document.createElement('div');
-        row.className = 'amount-row';
-        row.innerHTML = `<label>${name}</label>
-          <input type="number" step="0.01" min="0" placeholder="e.g. 150.00"
-            data-name="${name}" value="${current != null ? current : ''}">`;
-        container.appendChild(row);
-      };
-
-      (data.income    || []).forEach(i => makeRow(i.name, i.amount_override, incomeEl));
-      data.bills.forEach(b              => makeRow(b.name, b.amount_override, billsEl));
-      data.transfers.forEach(t          => makeRow(t.name, t.amount_override, xferEl));
-
-      document.getElementById('amounts-modal').classList.add('open');
-    }
-
-    function closeAmountsModal() {
-      document.getElementById('amounts-modal').classList.remove('open');
-    }
-
-    async function saveAmounts() {
-      const monthStr = `${calYear}-${String(calMonth).padStart(2,'0')}`;
-      const inputs = document.querySelectorAll('#amounts-modal input[data-name]');
-      const overrides = {};
-      inputs.forEach(inp => { overrides[inp.dataset.name] = inp.value; });
-
-      const resp = await fetch('/reports/api/schedule_amounts?month=' + monthStr, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({overrides, month: monthStr}),
-      });
-      if ((await resp.json()).ok) {
-        closeAmountsModal();
-        loadCal();
-      }
-    }
-
-    // Close modal on backdrop click
-    document.addEventListener('click', e => {
-      if (e.target.id === 'amounts-modal') closeAmountsModal();
-    });
 
     document.addEventListener('DOMContentLoaded', () => {
-      const now = new Date();
-      calYear  = now.getFullYear();
-      calMonth = now.getMonth() + 1;
-      loadCal();
-      loadAll();
-      document.getElementById('range').addEventListener('change', loadAll);
-      refreshTimer = setInterval(loadAll, REFRESH_MS);
+      const today = new Date();
+      const mm   = String(today.getMonth() + 1).padStart(2, '0');
+      const yyyy = today.getFullYear();
+      $('range-start').value = `${yyyy}-${mm}-01`;
+      $('range-end').value   = today.toISOString().slice(0, 10);
 
-      // Session heartbeat
+      loadAll();
+      $('range').addEventListener('change', onRangeChange);
+      setInterval(loadAll, REFRESH_MS);
+
       setInterval(async () => {
         const resp = await fetch('/reports/api/ping');
-        if (resp.status === 401) {
+        if (resp.status === 401)
           window.location.href = '/reports/login?next=' + encodeURIComponent(window.location.pathname);
-        }
       }, 60000);
     });
     </script>

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Budget Framework</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      body { font-family: system-ui, sans-serif; margin: 2rem; background: #f8f9fa; color: #1a1a2e; }
+      h1 { margin-bottom: .25rem; }
+      a { color: #0078d7; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .small { font-size: .88rem; color: #666; }
+
+      .panel { background: #fff; border-radius: 10px; padding: 1.1rem 1.4rem;
+        box-shadow: 0 1px 6px rgba(0,0,0,.08); margin-top: 1.1rem; }
+      .panel h2 { margin: 0 0 .6rem; font-size: 1.05rem; }
+
+      .row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+      input[type=number], input[type=text] { padding: .45rem .55rem; border: 1px solid #ccc;
+        border-radius: 6px; font-size: .95rem; }
+      select { padding: .35rem .4rem; border: 1px solid #ccc; border-radius: 6px; font-size: .88rem; }
+      .btn { padding: .5rem 1.1rem; border: none; border-radius: 7px; font-size: .95rem;
+        cursor: pointer; font-weight: 600; }
+      .btn-primary { background: #0078d7; color: #fff; }
+      .btn-primary:hover { background: #0064b5; }
+
+      /* Income panel */
+      .inc-grid { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-end; }
+      .inc-block .k { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+      .inc-block .v { font-size: 1.5rem; font-weight: 700; }
+
+      /* Tier summary */
+      #tier-summary { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; }
+      @media (max-width: 800px){ #tier-summary { grid-template-columns: 1fr; } }
+      .tier-card { border: 1px solid #eef0f2; border-radius: 10px; padding: .9rem 1.1rem; }
+      .tier-card .name { font-weight: 700; text-transform: uppercase; letter-spacing: .04em; font-size: .8rem; }
+      .tier-card.need .name { color: #2980b9; }
+      .tier-card.want .name { color: #e67e22; }
+      .tier-card.savings .name { color: #27ae60; }
+      .tier-card .amt { font-size: 1.5rem; font-weight: 700; margin: .15rem 0; }
+      .tier-card .pct { font-size: .82rem; color: #666; }
+      .guard { margin-top: .5rem; background: #eef0f2; height: 12px; border-radius: 999px; position: relative; overflow: visible; }
+      .guard .fill { height: 100%; border-radius: 999px; }
+      .tier-card.need .fill { background: #2980b9; }
+      .tier-card.want .fill { background: #e67e22; }
+      .tier-card.savings .fill { background: #27ae60; }
+      .guard .target-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #444; }
+      .guard .target-tick::after { content: attr(data-lbl); position: absolute; top: -15px; left: 3px;
+        font-size: .6rem; color: #444; white-space: nowrap; }
+
+      /* Category table */
+      table { width: 100%; border-collapse: collapse; margin-top: .4rem; }
+      th, td { padding: .5rem .6rem; text-align: left; border-bottom: 1px solid #eef0f2; font-size: .92rem; }
+      th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+      td.num, th.num { text-align: right; }
+      input.target-in { width: 110px; text-align: right; }
+      .tier-pill { font-size: .68rem; font-weight: 700; padding: .12rem .45rem; border-radius: 999px; }
+      .miniwrap { background: #eef0f2; height: 8px; border-radius: 999px; width: 120px; display: inline-block; overflow: hidden; vertical-align: middle; }
+      .minibar { height: 100%; }
+      .minibar.ok { background: #27ae60; }
+      .minibar.over { background: #c0392b; }
+      tbody tr.group-head td { background: #fafbfc; font-weight: 700; color: #444; }
+      #save-status { margin-left: .8rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Budget Framework</h1>
+    <p>
+      <a href="/reports/">← Reports</a> &nbsp;|&nbsp;
+      <a href="/reports/goals">Savings Goals</a> &nbsp;|&nbsp;
+      <a href="/reports/monthly">Monthly Cashflow</a> &nbsp;|&nbsp;
+      <a href="/reports/transactions">Transactions</a>
+    </p>
+    <p class="small">Needs-based budget for <strong id="month-label">…</strong>.
+       Set a target ("need") per category and tag each as Need / Want / Savings.
+       Actuals and a 3-month reference are shown so you can budget against reality.</p>
+
+    <!-- Income -->
+    <div class="panel">
+      <h2>Income</h2>
+      <div class="inc-grid">
+        <div class="inc-block">
+          <div class="k">Expected monthly income</div>
+          <div class="row">
+            $<input type="number" id="expected-income" min="0" step="50" style="width:140px;font-size:1.2rem;font-weight:700;">
+          </div>
+        </div>
+        <div class="inc-block">
+          <div class="k">Actual income this month (derived)</div>
+          <div class="v" id="income-actual">–</div>
+          <div class="small" id="income-note"></div>
+        </div>
+        <div class="inc-block">
+          <div class="k">Allocated / month</div>
+          <div class="v" id="planned-total">–</div>
+        </div>
+        <div class="inc-block">
+          <div class="k">Planned surplus → savings</div>
+          <div class="v" id="planned-surplus">–</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 50/30/20 tier summary -->
+    <div class="panel">
+      <h2>Allocation (50 / 30 / 20 guide)</h2>
+      <div id="tier-summary"></div>
+      <p class="small" id="goal-line" style="margin-top:.8rem;"></p>
+    </div>
+
+    <!-- Category table -->
+    <div class="panel">
+      <h2>Categories
+        <button class="btn btn-primary" style="float:right" onclick="save()">Save budget</button>
+        <span id="save-status" class="small"></span>
+      </h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th><th>Tier</th>
+            <th class="num">Target / mo</th>
+            <th class="num">This month</th>
+            <th>Progress</th>
+            <th class="num">3-mo avg</th>
+          </tr>
+        </thead>
+        <tbody id="cat-body"></tbody>
+      </table>
+      <p class="small">Tip: a quick start is to copy the 3-month average into the target for each Need,
+         then trim Wants. Your Savings target auto-includes your active goal's required monthly amount.</p>
+    </div>
+
+    <script>
+    const $ = id => document.getElementById(id);
+    const money  = n => '$' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+    const money2 = n => '$' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const TIERS = ['need','want','savings'];
+    const TIER_LABEL = { need:'Need', want:'Want', savings:'Savings' };
+    let DATA = null;
+
+    async function fetchJSON(url, opts){ const r=await fetch(url,opts); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+    function monthName(ym){
+      const [y,m]=ym.split('-'); const d=new Date(+y,+m-1,1);
+      return d.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+    }
+
+    function tierPill(t){
+      const c = {need:'#2980b9',want:'#e67e22',savings:'#27ae60'}[t]||'#888';
+      const bg= {need:'#e7f0fb',want:'#fdeede',savings:'#e7f7ee'}[t]||'#eee';
+      return `<span class="tier-pill" style="color:${c};background:${bg}">${TIER_LABEL[t]}</span>`;
+    }
+
+    function renderCategories(){
+      const body = $('cat-body'); body.innerHTML='';
+      // group by tier for readability
+      for(const t of TIERS){
+        const rows = DATA.categories.filter(c=>c.tier===t)
+                       .sort((a,b)=> b.actual - a.actual);
+        const head = document.createElement('tr');
+        head.className='group-head';
+        head.innerHTML = `<td colspan="6">${TIER_LABEL[t]}s</td>`;
+        body.appendChild(head);
+        if(t==='savings'){
+          // synthetic goal row
+          if(DATA.goal && DATA.goal.need_monthly>0){
+            const tr=document.createElement('tr');
+            tr.innerHTML = `<td>${DATA.goal.name||'Savings goal'} <span class="small">(goal)</span></td>
+              <td>${tierPill('savings')}</td>
+              <td class="num">${money2(DATA.goal.need_monthly)}</td>
+              <td class="num small">auto</td><td></td><td class="num"></td>`;
+            body.appendChild(tr);
+          }
+        }
+        for(const c of rows){
+          const pct = c.target>0 ? Math.min(100, 100*c.actual/c.target) : 0;
+          const over = c.target>0 && c.actual>c.target;
+          const tr=document.createElement('tr');
+          tr.innerHTML = `
+            <td>${c.category}</td>
+            <td><select data-cat="${c.category}" class="tier-sel">
+              ${TIERS.map(tt=>`<option value="${tt}" ${tt===c.tier?'selected':''}>${TIER_LABEL[tt]}</option>`).join('')}
+            </select></td>
+            <td class="num"><input type="number" min="0" step="10" class="target-in"
+                 data-cat="${c.category}" value="${c.target||''}" placeholder="${c.ref_avg||0}"></td>
+            <td class="num">${money2(c.actual)}</td>
+            <td><span class="miniwrap"><span class="minibar ${over?'over':'ok'}" style="width:${pct}%"></span></span></td>
+            <td class="num small">${money2(c.ref_avg)}</td>`;
+          body.appendChild(tr);
+        }
+      }
+      body.querySelectorAll('.target-in').forEach(el=>el.addEventListener('input', recompute));
+      body.querySelectorAll('.tier-sel').forEach(el=>el.addEventListener('change', e=>{
+        const cat=e.target.getAttribute('data-cat');
+        const c=DATA.categories.find(x=>x.category===cat); if(c){ c.tier=e.target.value; renderCategories(); recompute(); }
+      }));
+    }
+
+    function readInputsIntoData(){
+      document.querySelectorAll('.target-in').forEach(el=>{
+        const c=DATA.categories.find(x=>x.category===el.getAttribute('data-cat'));
+        if(c) c.target = parseFloat(el.value)||0;
+      });
+      DATA.income.expected = parseFloat($('expected-income').value)||0;
+    }
+
+    function recompute(){
+      readInputsIntoData();
+      const base = DATA.income.expected || DATA.income.actual || 0;
+      const tiers={need:0,want:0,savings:0};
+      DATA.categories.forEach(c=> tiers[c.tier]+=(c.target||0));
+      tiers.savings += (DATA.goal?.need_monthly||0);
+      const planned = tiers.need+tiers.want+tiers.savings;
+
+      $('planned-total').textContent = money2(planned);
+      $('planned-surplus').textContent = money2(base - planned);
+      $('planned-surplus').style.color = (base-planned)>=0 ? '#0a7a43' : '#c0392b';
+
+      const guard = DATA.guardrails;
+      const sum = $('tier-summary'); sum.innerHTML='';
+      for(const t of TIERS){
+        const amt=tiers[t]; const pct = base? 100*amt/base : 0;
+        const card=document.createElement('div');
+        card.className='tier-card '+t;
+        card.innerHTML = `
+          <div class="name">${TIER_LABEL[t]}s</div>
+          <div class="amt">${money2(amt)}</div>
+          <div class="pct">${pct.toFixed(0)}% of income · guide ${guard[t]}%</div>
+          <div class="guard"><div class="fill" style="width:${Math.min(100,pct)}%"></div>
+            <div class="target-tick" data-lbl="${guard[t]}%" style="left:${guard[t]}%"></div></div>`;
+        sum.appendChild(card);
+      }
+      $('goal-line').innerHTML = (DATA.goal && DATA.goal.need_monthly>0)
+        ? `🎯 Your active goal <strong>${DATA.goal.name}</strong> needs <strong>${money2(DATA.goal.need_monthly)}/mo</strong>, included in the Savings tier above. <a href="/reports/goals">Manage goals →</a>`
+        : `No active savings goal yet. <a href="/reports/goals">Set one →</a> and it will appear in your Savings tier.`;
+    }
+
+    async function save(){
+      readInputsIntoData();
+      $('save-status').textContent='Saving…';
+      try{
+        await fetchJSON('/reports/api/budget_plan', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            expected_income: DATA.income.expected,
+            categories: DATA.categories.map(c=>({category:c.category, tier:c.tier, target_amount:c.target||0})),
+          }),
+        });
+        $('save-status').textContent='Saved ✓';
+        setTimeout(()=>$('save-status').textContent='', 2500);
+      }catch(e){ $('save-status').textContent='Error: '+e.message; }
+    }
+
+    async function load(){
+      DATA = await fetchJSON('/reports/api/budget_plan');
+      $('month-label').textContent = monthName(DATA.month);
+      $('expected-income').value = DATA.income.expected || '';
+      $('income-actual').textContent = money2(DATA.income.actual);
+      $('income-note').textContent = DATA.income.actual < 100
+        ? 'Auto-detected income looks low — payroll may not be tagged yet. Set Expected above as your anchor.'
+        : '';
+      renderCategories();
+      recompute();
+      $('expected-income').addEventListener('input', recompute);
+    }
+    document.addEventListener('DOMContentLoaded', load);
+    </script>
+  </body>
+</html>

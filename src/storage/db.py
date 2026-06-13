@@ -593,11 +593,11 @@ def upsert_transaction_classification(
             )
             VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(transaction_id) DO UPDATE SET
-              exclude_from_spend=excluded.exclude_from_spend,
-              exclude_reason=excluded.exclude_reason,
-              user_category=COALESCE(excluded.user_category, transaction_classifications.user_category),
-              user_subcategory=COALESCE(excluded.user_subcategory, transaction_classifications.user_subcategory),
-              merchant_normalized=COALESCE(excluded.merchant_normalized, transaction_classifications.merchant_normalized),
+              exclude_from_spend=transaction_classifications.exclude_from_spend,
+              exclude_reason=COALESCE(transaction_classifications.exclude_reason, excluded.exclude_reason),
+              user_category=COALESCE(transaction_classifications.user_category, excluded.user_category),
+              user_subcategory=COALESCE(transaction_classifications.user_subcategory, excluded.user_subcategory),
+              merchant_normalized=COALESCE(transaction_classifications.merchant_normalized, excluded.merchant_normalized),
               updated_at=CURRENT_TIMESTAMP
             """,
             (
@@ -628,11 +628,11 @@ def upsert_transaction_classifications_batch(rows: list[dict]) -> int:
         )
         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(transaction_id) DO UPDATE SET
-          exclude_from_spend=excluded.exclude_from_spend,
-          exclude_reason=excluded.exclude_reason,
-          user_category=COALESCE(excluded.user_category, transaction_classifications.user_category),
-          user_subcategory=COALESCE(excluded.user_subcategory, transaction_classifications.user_subcategory),
-          merchant_normalized=COALESCE(excluded.merchant_normalized, transaction_classifications.merchant_normalized),
+          exclude_from_spend=transaction_classifications.exclude_from_spend,
+          exclude_reason=COALESCE(transaction_classifications.exclude_reason, excluded.exclude_reason),
+          user_category=COALESCE(transaction_classifications.user_category, excluded.user_category),
+          user_subcategory=COALESCE(transaction_classifications.user_subcategory, excluded.user_subcategory),
+          merchant_normalized=COALESCE(transaction_classifications.merchant_normalized, excluded.merchant_normalized),
           updated_at=CURRENT_TIMESTAMP
     """
     params = [
@@ -737,27 +737,38 @@ def classification_exists(transaction_id: str) -> bool:
         return row is not None
 
 
-def _rule_matches(rule: dict, name_norm: str, merchant_norm: str) -> bool:
+def _rule_matches(rule: dict, name_norm: str, merchant_norm: str, amount: float = 0.0) -> bool:
     field = rule["match_field"]
-    op = rule["match_op"]
-    val = rule["match_value"] or ""
+    op    = rule["match_op"]
+    val   = rule["match_value"] or ""
 
     candidates = []
     if field == "name":
         candidates = [name_norm]
     elif field == "merchant_name":
         candidates = [merchant_norm]
-    else:  # 'either'
+    else:  # 'either' / 'merchant_normalized'
         candidates = [merchant_norm, name_norm]
 
+    text_match = False
     for c in candidates:
         if not c:
             continue
         if op == "equals" and c == val:
-            return True
+            text_match = True; break
         if op == "contains" and val and val in c:
-            return True
-    return False
+            text_match = True; break
+
+    if not text_match:
+        return False
+
+    # If the rule has an amount constraint, enforce it (±$0.02 tolerance)
+    amount_exact = rule.get("amount_exact")
+    if amount_exact is not None:
+        if abs(abs(amount) - float(amount_exact)) > 0.02:
+            return False
+
+    return True
 
 
 def apply_best_rule_to_transaction(transaction_id: str) -> dict | None:
@@ -773,8 +784,9 @@ def apply_best_rule_to_transaction(transaction_id: str) -> dict | None:
     if not tx:
         return None
 
-    name_norm = normalize_merchant(tx.get("name"))
+    name_norm     = normalize_merchant(tx.get("name"))
     merchant_norm = normalize_merchant(tx.get("merchant_name"))
+    tx_amount     = float(tx.get("amount") or 0)
 
     with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
@@ -792,7 +804,7 @@ def apply_best_rule_to_transaction(transaction_id: str) -> dict | None:
 
     for r in rules:
         rule = dict(r)
-        if _rule_matches(rule, name_norm, merchant_norm):
+        if _rule_matches(rule, name_norm, merchant_norm, tx_amount):
             upsert_transaction_classification(
                 transaction_id=transaction_id,
                 exclude_from_spend=rule.get("exclude_from_spend", 0),

@@ -290,18 +290,26 @@ _PFC_CATEGORY_MAP = {
     "BANK_FEES":                 "Bank Fees",
 }
 
+_INVESTMENT_NAMES = (
+    "schwab", "fidelity", "vanguard", "merrill", "edward jones",
+    "e*trade", "etrade", "robinhood", "acorns", "wealthfront", "betterment",
+)
+
 def classify_one(txn_row: dict) -> tuple[int, str | None, str | None, str | None]:
     """
     Returns: (exclude_from_spend, exclude_reason, merchant_normalized, user_category)
 
-    Policy (loose v1):
-      - Exclude definite credit card payments
-      - Exclude transfers ONLY when text also looks like a transfer/payment
-      - Do NOT exclude just because Plaid labeled it TRANSFER_* if merchant looks real
-      - Maps Plaid personal_finance_category.primary to a friendly user_category label
+    Checking-account cashflow policy:
+      - Zelle IN  (amount < 0)  → Income, not excluded
+      - Zelle OUT (amount > 0)  → Expense, not excluded
+      - Credit card payment     → excluded
+      - Transfer to investment broker (Schwab etc.) → "Investment", excluded
+      - Transfer OUT (non-investment) → "Savings", excluded
+      - Transfer IN from savings  → "Transfer In", excluded (not income)
     """
     name = (txn_row.get("name") or "").lower()
     merchant = (txn_row.get("merchant_name") or "").lower()
+    amount = float(txn_row.get("amount") or 0)
     merch_norm = normalize_merchant(txn_row.get("merchant_name") or txn_row.get("name"))
 
     meta = {}
@@ -316,26 +324,43 @@ def classify_one(txn_row: dict) -> tuple[int, str | None, str | None, str | None
     pfc_detailed = (pfc.get("detailed") or "").upper()
 
     text = f"{name} {merchant}".strip()
-    has_transfer_hints = any(h in text for h in _TRANSFER_HINTS)
 
     user_category = _PFC_CATEGORY_MAP.get(pfc_primary)
 
-    # 1) Strong exclude: Plaid explicitly says credit card payment
+    # 1) Zelle — person-to-person, treat as income or expense (never a transfer)
+    if "zelle" in text:
+        if amount < 0:   # money arriving in checking
+            return 0, None, merch_norm, "Income"
+        else:            # money leaving checking to a person
+            return 0, None, merch_norm, "Expense"
+
+    # 2) Credit card payment → exclude
     if "CREDIT_CARD_PAYMENT" in pfc_detailed:
         return 1, "pfc_credit_card_payment", merch_norm, user_category
 
-    # 2) Transfers: require BOTH (category suggests transfer) AND (text hints OR empty merchant)
-    is_transfer_category = (
-        "ACCOUNT_TRANSFER" in pfc_detailed
-        or pfc_primary in ("TRANSFER_IN", "TRANSFER_OUT")
-    )
+    # 3) Investment transfers (Schwab, Fidelity, etc.) → "Investment", excluded
+    if any(nm in text for nm in _INVESTMENT_NAMES):
+        return 1, "investment_transfer", merch_norm, "Investment"
 
-    merchant_present = bool(merchant) or bool(txn_row.get("merchant_name"))
-    if is_transfer_category and (has_transfer_hints or not merchant_present):
+    has_transfer_hints = any(h in text for h in _TRANSFER_HINTS)
+    merchant_present   = bool(merchant) or bool(txn_row.get("merchant_name"))
+    is_out_category    = pfc_primary == "TRANSFER_OUT" or "TRANSFER_OUT" in pfc_detailed
+    is_in_category     = pfc_primary == "TRANSFER_IN"  or "TRANSFER_IN"  in pfc_detailed
+    is_transfer_cat    = is_out_category or is_in_category or "ACCOUNT_TRANSFER" in pfc_detailed
+
+    # 4) Transfer OUT of checking → savings (exclude from spend, tag Savings)
+    if is_out_category and amount > 0 and (has_transfer_hints or not merchant_present):
+        return 1, "savings_transfer_out", merch_norm, "Savings"
+
+    # 5) Transfer IN from savings → exclude but NOT income
+    if is_in_category and amount < 0 and (has_transfer_hints or not merchant_present):
+        return 1, "transfer_in_excluded", merch_norm, "Transfer In"
+
+    # 6) Remaining generic transfer (unknown direction)
+    if is_transfer_cat and (has_transfer_hints or not merchant_present):
         return 1, "pfc_transfer_with_transfer_text", merch_norm, user_category
 
-    # 3) Heuristic fallback (no/weak PFC):
-    # if it screams payment/transfer, exclude
+    # 7) Heuristic: text strongly resembles a payment/transfer
     if has_transfer_hints and (("card" in text) or ("bank" in text) or ("payment" in text) or ("pmt" in text)):
         return 1, "text_looks_like_payment_or_transfer", merch_norm, user_category
 
@@ -1194,88 +1219,198 @@ def index():
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Plaid Flask Quick Flow</title>
+    <title>Connect + Sync</title>
     <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
     <style>
-      body { font-family: system-ui, sans-serif; padding: 2rem; }
-      button { padding: .6rem 1rem; font-size: 1rem; margin-right: .5rem; }
-      pre { background:#f6f8fa; padding:1rem; border-radius:8px; max-width:1100px; overflow:auto; }
-      a { display:inline-block; margin-top:1rem; }
-      #status { padding:.5rem .75rem; background:#fff6d6; border:1px solid #f0d37a; border-radius:8px; margin: .75rem 0; display:none; }
+      *, *::before, *::after { box-sizing: border-box; }
+      body { font-family: system-ui, sans-serif; padding: 2rem; background: #f8f9fa; max-width: 860px; }
+      h1 { margin: 0 0 1.25rem; color: #1a1a2e; }
+      button {
+        padding: .5rem .95rem; font-size: .92rem; margin-right: .4rem;
+        background: #0078d7; color: #fff; border: none; border-radius: 6px; cursor: pointer;
+      }
+      button:hover { background: #005fa3; }
+      button:disabled { background: #aaa; cursor: default; }
+      button.btn-danger { background: #c0392b; }
+      button.btn-danger:hover { background: #992d22; }
+      button.btn-secondary { background: #6c757d; }
+      button.btn-secondary:hover { background: #545b62; }
+      select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 6px; font-size: .92rem; }
+
+      .btn-row { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; align-items: center; }
+      .bank-row { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.25rem; align-items: center; }
+
+      /* Spinning busy indicator */
+      #busy-bar {
+        display: none; padding: .5rem .85rem; border-radius: 6px;
+        background: #e8f0fe; color: #1a56b0; font-size: .9rem;
+        border: 1px solid #b3cdf5; margin-bottom: .75rem;
+      }
+
+      /* Result panel */
+      #result-panel { margin-bottom: 1rem; }
+      .result-card {
+        border-radius: 8px; padding: .75rem 1rem; margin-bottom: .5rem;
+        font-size: .9rem; line-height: 1.5;
+      }
+      .card-ok      { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+      .card-warn    { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; }
+      .card-error   { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+      .card-info    { background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; }
+      .card-title   { font-weight: 700; margin-bottom: .2rem; }
+      .card-detail  { font-size: .82rem; opacity: .85; }
+      .card-action  { margin-top: .4rem; font-weight: 600; font-size: .85rem; }
+
+      a { color: #0078d7; text-decoration: none; font-size: .95rem; }
+      a:hover { text-decoration: underline; }
+      .nav-link { display: inline-block; margin-top: 1rem; }
     </style>
   </head>
   <body>
     <h1>Connect + Sync</h1>
 
-    <div style="margin-bottom: 1rem;">
-        <button id="refresh-btn">Refresh data</button>
-        <button id="add-bank-btn">Add bank</button>
-        <button id="resync-full-btn" title="Resets sync cursors and re-downloads all transactions to fill any missing data">Full Re-sync</button>
+    <div class="btn-row">
+      <button id="refresh-btn">Refresh data</button>
+      <button id="add-bank-btn">Add bank</button>
+      <button id="resync-full-btn" class="btn-secondary"
+              title="Resets sync cursors and re-downloads all transactions">Full Re-sync</button>
     </div>
 
-    <div style="margin-bottom: 1rem;">
-        <label for="item-select"><b>Existing bank:</b></label>
-        <select id="item-select" style="min-width: 420px;"></select>
-        <button id="reconnect-btn">Reconnect selected</button>
-        <button id="remove-btn">Remove selected</button>
+    <div class="bank-row">
+      <label for="item-select"><b>Bank:</b></label>
+      <select id="item-select" style="min-width: 360px;"></select>
+      <button id="reconnect-btn">Reconnect</button>
+      <button id="remove-btn" class="btn-danger">Remove</button>
     </div>
 
-    <div id="status"></div>
-    <pre id="out"></pre>
+    <div id="busy-bar"></div>
+    <div id="result-panel"></div>
 
-    <p><a href="/reports/login">→ Reports Login</a></p>
+    <a class="nav-link" href="/reports/login">→ Reports Login</a>
 
 <script>
-const out = document.getElementById('out');
-const statusEl = document.getElementById('status');
-
-const refreshBtn = document.getElementById('refresh-btn');
-const addBtn = document.getElementById('add-bank-btn');
+const busyBar    = document.getElementById('busy-bar');
+const resultPanel = document.getElementById('result-panel');
+const refreshBtn  = document.getElementById('refresh-btn');
+const addBtn      = document.getElementById('add-bank-btn');
 const reconnectBtn = document.getElementById('reconnect-btn');
-const removeBtn = document.getElementById('remove-btn');
+const removeBtn   = document.getElementById('remove-btn');
 const resyncFullBtn = document.getElementById('resync-full-btn');
-const itemSelect = document.getElementById('item-select');
+const itemSelect  = document.getElementById('item-select');
 
-function log(obj) { out.textContent = JSON.stringify(obj, null, 2); }
-
-function setStatus(msg) {
-  if (!msg) {
-    statusEl.style.display = 'none';
-    statusEl.textContent = '';
-    return;
-  }
-  statusEl.style.display = 'block';
-  statusEl.textContent = msg;
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function setBusy(busy, label) {
-  refreshBtn.disabled = busy;
-  addBtn.disabled = busy;
-  reconnectBtn.disabled = busy;
-  removeBtn.disabled = busy;
-  resyncFullBtn.disabled = busy;
-  if (busy) setStatus(label || 'Working...');
-  else setStatus(null);
+  [refreshBtn, addBtn, reconnectBtn, removeBtn, resyncFullBtn].forEach(b => b.disabled = busy);
+  if (busy) {
+    busyBar.style.display = 'block';
+    busyBar.textContent = label || 'Working...';
+  } else {
+    busyBar.style.display = 'none';
+  }
+}
+
+function clearResult() { resultPanel.innerHTML = ''; }
+
+function addCard(type, title, detail, action) {
+  const d = document.createElement('div');
+  d.className = 'result-card card-' + type;
+  d.innerHTML = `<div class="card-title">${escHtml(title)}</div>` +
+    (detail ? `<div class="card-detail">${escHtml(detail)}</div>` : '') +
+    (action ? `<div class="card-action">${action}</div>` : '');
+  resultPanel.appendChild(d);
+}
+
+function showSyncResult(j, label) {
+  clearResult();
+  if (!j || j.error) {
+    addCard('error', (label || 'Sync') + ' failed', j ? j.error : 'Unknown error');
+    return;
+  }
+  const txn  = j.transactions_sync || {};
+  const added = txn.total_added || 0;
+  const mod   = txn.total_modified || 0;
+  const rem   = txn.total_removed || 0;
+  const cls   = (j.classify || {}).classified || 0;
+  const accts = (j.accounts_sync || {}).total_accounts_saved || 0;
+  const ms    = j.elapsed_ms ? ` (${(j.elapsed_ms/1000).toFixed(1)}s)` : '';
+
+  if (added === 0 && mod === 0 && rem === 0) {
+    addCard('ok', (label || 'Refresh') + ' complete — no new transactions' + ms,
+      `${accts} account(s) updated  •  ${cls} classified`);
+  } else {
+    const parts = [];
+    if (added) parts.push(`${added} new`);
+    if (mod)   parts.push(`${mod} updated`);
+    if (rem)   parts.push(`${rem} removed`);
+    addCard('ok', (label || 'Refresh') + ' complete — ' + parts.join(', ') + ms,
+      `${accts} account(s) synced  •  ${cls} classified`);
+  }
+
+  // Per-item errors
+  const itemErrors = (txn.errors || []).concat((j.accounts_sync || {}).errors || []);
+  itemErrors.forEach(err => showItemError(err));
+}
+
+function showItemError(err) {
+  const code    = err.error_code || err.code || '';
+  const msg     = err.error_message || err.display_message || err.message || String(err);
+  const inst    = err.institution_name || err.item_id || 'A bank';
+
+  if (code === 'ITEM_LOGIN_REQUIRED') {
+    addCard('warn', inst + ' — credentials expired',
+      'Plaid can no longer access this account.',
+      'Select it in the dropdown and click <b>Reconnect</b> to re-authenticate.');
+  } else if (code === 'INSTITUTION_REGISTRATION_REQUIRED') {
+    addCard('warn', inst + ' — registration required',
+      msg,
+      'Visit <b>dashboard.plaid.com → Activity → Status → OAuth Institutions</b> to register.');
+  } else if (code && code.startsWith('INSTITUTION_')) {
+    addCard('warn', inst + ' — institution issue (' + code + ')',
+      msg, 'This is usually temporary. Try again later or check Plaid status.');
+  } else if (code === 'INVALID_ACCESS_TOKEN' || code === 'ITEM_NOT_FOUND') {
+    addCard('error', inst + ' — invalid connection',
+      msg, 'Remove and re-add this bank to restore access.');
+  } else {
+    addCard('error', inst + ' — sync error' + (code ? ' (' + code + ')' : ''), msg);
+  }
+}
+
+function showLinkError(err, metadata) {
+  if (!err) return;
+  const code = err.error_code || '';
+  const msg  = err.display_message || err.error_message || '';
+  const inst = (metadata && metadata.institution) ? metadata.institution.name : 'Bank';
+
+  if (code === 'ITEM_LOGIN_REQUIRED') {
+    addCard('warn', inst + ' — session expired', msg,
+      'Select it below and click <b>Reconnect</b>.');
+  } else if (code === 'INSTITUTION_REGISTRATION_REQUIRED') {
+    addCard('warn', inst + ' — not registered with Plaid', msg,
+      'Register at <b>dashboard.plaid.com → Activity → Status → OAuth Institutions</b>.');
+  } else if (code === 'INSTITUTION_NOT_AVAILABLE') {
+    addCard('warn', inst + ' — temporarily unavailable', msg || 'Try again later.');
+  } else {
+    addCard('error', inst + ' — Link error (' + code + ')', msg || 'The bank connection could not be completed.');
+  }
 }
 
 resyncFullBtn.addEventListener('click', async () => {
   if (!confirm('This resets all sync cursors and re-downloads every transaction from Plaid. Continue?')) return;
-  setBusy(true, 'Re-syncing all transactions from scratch…');
+  clearResult();
+  setBusy(true, 'Full re-sync in progress — this may take a minute...');
   try {
     const r = await fetch('/resync_full', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const j = await r.json();
-    log(j);
     if (!r.ok) throw new Error(j.error || 'resync_full failed');
-    setStatus(`Done — ${j.transactions_sync.total_added} transactions synced, ${j.classify.classified} classified`);
+    showSyncResult(j, 'Full re-sync');
   } catch (e) {
-    log({ step: 'resync_full error', error: e.message });
-    setStatus('Re-sync failed: ' + e.message);
+    clearResult();
+    addCard('error', 'Full re-sync failed', e.message);
   } finally {
-    resyncFullBtn.disabled = false;
-    refreshBtn.disabled = false;
-    addBtn.disabled = false;
-    reconnectBtn.disabled = false;
-    removeBtn.disabled = false;
+    setBusy(false);
   }
 });
 
@@ -1359,14 +1494,15 @@ async function removeItem(item_id) {
 
 // --- Button actions ---
 refreshBtn.onclick = async () => {
-  setBusy(true, 'Refreshing: syncing accounts + transactions...');
+  clearResult();
+  setBusy(true, 'Refreshing — syncing accounts and transactions...');
   try {
-    log({ step: 'refresh starting' });
     const res = await syncAllWithTimeout();
-    log({ step: 'refresh complete', res });
+    showSyncResult(res, 'Refresh');
     await loadItems();
   } catch (e) {
-    log({ step: 'refresh error', error: e.message || String(e) });
+    clearResult();
+    addCard('error', 'Refresh failed', e.message || String(e));
   } finally {
     setBusy(false);
   }
@@ -1381,51 +1517,39 @@ addBtn.onclick = async () => {
       token: linkToken,
 
       onSuccess: async (public_token, metadata) => {
-        setBusy(true, 'Link success: exchanging token...');
+        clearResult();
+        setBusy(true, 'Link success — exchanging token...');
         try {
           const first = await exchangePublicToken(public_token, metadata, false);
 
           if (!first.ok && first.status === 409 && first.body && first.body.action === "confirm_duplicate") {
             const msg = first.body.message || "This institution is already linked. Proceed anyway?";
-            const proceed = confirm(msg);
-            if (!proceed) {
-              log({ step: "duplicate link canceled by user", details: first.body });
+            if (!confirm(msg)) {
+              addCard('info', 'Duplicate link cancelled', 'No changes were made.');
               return;
             }
-
-            setBusy(true, 'Confirmed: exchanging token (duplicate allowed)...');
+            setBusy(true, 'Exchanging token (duplicate allowed)...');
             const second = await exchangePublicToken(public_token, metadata, true);
-            if (!second.ok) {
-              log({ step: "exchange failed after confirmation", status: second.status, response: second.body });
-              throw new Error("Failed to exchange public_token after confirmation");
-            }
-            log({ step: "exchanged after confirmation", response: second.body });
-
+            if (!second.ok) throw new Error("Failed to exchange token after duplicate confirmation");
           } else {
-            if (!first.ok) {
-              log({ step: "exchange failed", status: first.status, response: first.body });
-              throw new Error("Failed to exchange public_token");
-            }
-            log({ step: "exchanged", response: first.body });
+            if (!first.ok) throw new Error("Failed to exchange public token");
           }
 
-          setBusy(true, 'Syncing all items (this can take a bit on first link)...');
-          log({ step: 'sync starting', at: new Date().toISOString() });
-
+          setBusy(true, 'Syncing — this may take a moment on first link...');
           const synced = await syncAllWithTimeout();
-          log({ step: "synced", synced });
-
+          showSyncResult(synced, 'Bank added');
           await loadItems();
 
         } catch (e) {
-          log({ step: "error after onSuccess", error: e.message || String(e) });
+          clearResult();
+          addCard('error', 'Add bank failed', e.message || String(e));
         } finally {
           setBusy(false);
         }
       },
 
       onExit: (err, metadata) => {
-        if (err) log({ step: 'plaid_link exit error', err, metadata });
+        if (err) { clearResult(); showLinkError(err, metadata); }
         setBusy(false);
       }
     });
@@ -1433,16 +1557,18 @@ addBtn.onclick = async () => {
     handler.open();
 
   } catch (e) {
-    log({ step: 'add bank error', error: e.message || String(e) });
+    clearResult();
+    addCard('error', 'Add bank failed', e.message || String(e));
     setBusy(false);
   }
 };
 
 reconnectBtn.onclick = async () => {
   const item_id = itemSelect.value;
-  if (!item_id) { log({ step: 'reconnect', error: 'No item selected' }); return; }
+  if (!item_id) { addCard('warn', 'No bank selected', 'Choose a bank from the dropdown first.'); return; }
 
-  setBusy(true, 'Reconnect: opening Plaid Link (update mode)...');
+  clearResult();
+  setBusy(true, 'Opening Plaid reconnect...');
   try {
     const linkToken = await createUpdateLinkToken(item_id);
 
@@ -1450,20 +1576,22 @@ reconnectBtn.onclick = async () => {
       token: linkToken,
 
       onSuccess: async () => {
-        setBusy(true, 'Reconnect success: syncing all items...');
+        clearResult();
+        setBusy(true, 'Reconnect success — syncing...');
         try {
           const synced = await syncAllWithTimeout();
-          log({ step: 'reconnect sync complete', synced });
+          showSyncResult(synced, 'Reconnect');
           await loadItems();
         } catch (e) {
-          log({ step: 'reconnect sync error', error: e.message || String(e) });
+          clearResult();
+          addCard('error', 'Reconnect sync failed', e.message || String(e));
         } finally {
           setBusy(false);
         }
       },
 
       onExit: (err, metadata) => {
-        if (err) log({ step: 'reconnect exit error', err, metadata });
+        if (err) { clearResult(); showLinkError(err, metadata); }
         setBusy(false);
       }
     });
@@ -1471,31 +1599,34 @@ reconnectBtn.onclick = async () => {
     handler.open();
 
   } catch (e) {
-    log({ step: 'reconnect error', error: e.message || String(e) });
+    clearResult();
+    addCard('error', 'Reconnect failed', e.message || String(e));
     setBusy(false);
   }
 };
 
 removeBtn.onclick = async () => {
   const item_id = itemSelect.value;
-  if (!item_id) { log({ step: 'remove', error: 'No item selected' }); return; }
+  if (!item_id) { addCard('warn', 'No bank selected', 'Choose a bank from the dropdown first.'); return; }
 
   if (!confirm('Remove this bank? This revokes Plaid access and deletes local data.')) return;
 
-  setBusy(true, 'Removing bank (Plaid unlink + local delete)...');
+  clearResult();
+  setBusy(true, 'Removing bank...');
   try {
-    const res = await removeItem(item_id);
-    log({ step: 'removed', res });
+    await removeItem(item_id);
+    addCard('ok', 'Bank removed', 'Plaid access revoked and local data deleted.');
     await loadItems();
   } catch (e) {
-    log({ step: 'remove error', error: e.message || String(e) });
+    clearResult();
+    addCard('error', 'Remove failed', e.message || String(e));
   } finally {
     setBusy(false);
   }
 };
 
 // Initial load
-loadItems().catch(e => log({ step: 'load items error', error: e.message || String(e) }));
+loadItems().catch(e => addCard('error', 'Could not load banks', e.message || String(e)));
 </script>
 
   </body>

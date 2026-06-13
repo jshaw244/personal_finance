@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Transactions</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
+
+    .topbar {
+      background: #1a1a2e; color: #eee; padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; position: sticky; top: 0; z-index: 50;
+    }
+    .topbar h1 { margin: 0; font-size: 1.05rem; color: #fff; }
+    .topbar a  { color: #aad4f5; font-size: .88rem; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+
+    /* Filter bar */
+    .filter-bar {
+      background: #fff; border-bottom: 1px solid #dde; padding: .65rem 1.5rem;
+      display: flex; gap: .6rem; flex-wrap: wrap; align-items: center;
+      position: sticky; top: 44px; z-index: 40;
+    }
+    .filter-bar input[type=text],
+    .filter-bar select {
+      padding: .35rem .6rem; border: 1px solid #ccd; border-radius: 6px;
+      font-size: .86rem; background: #fafafa; height: 32px;
+    }
+    .filter-bar input[type=text] { min-width: 200px; }
+    .filter-bar select { min-width: 140px; }
+    .btn-sm {
+      padding: .3rem .7rem; border: none; border-radius: 6px; cursor: pointer;
+      font-size: .84rem; height: 32px;
+    }
+    .btn-primary { background: #0078d7; color: #fff; }
+    .btn-primary:hover { background: #005fa3; }
+    .btn-ghost { background: #e9ecef; color: #555; }
+    .btn-ghost:hover { background: #dde; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .btn-danger:hover { background: #c0392b; }
+
+    .result-info { font-size: .8rem; color: #888; margin-left: auto; white-space: nowrap; }
+
+    /* Table */
+    .table-wrap { padding: .75rem 1.5rem 1rem; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .86rem; background: #fff;
+            border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+    thead th {
+      background: #1a1a2e; color: #eee; padding: .5rem .75rem;
+      text-align: left; font-size: .76rem; text-transform: uppercase;
+      letter-spacing: .04em; white-space: nowrap; cursor: pointer;
+    }
+    thead th:hover { background: #24243e; }
+    thead th.right { text-align: right; }
+    tbody td { padding: .38rem .75rem; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tbody tr:hover { background: #fafbff; }
+    tbody tr.excluded { opacity: .5; }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .td-date   { white-space: nowrap; color: #666; font-size: .82rem; width: 80px; }
+    .td-merchant { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .td-amount { text-align: right; font-variant-numeric: tabular-nums;
+                 font-family: 'Courier New', monospace; white-space: nowrap; }
+    .td-amount.out { color: #c0392b; font-weight: 600; }
+    .td-amount.in  { color: #27ae60; font-weight: 600; }
+    .td-acct   { font-size: .78rem; color: #888; white-space: nowrap; }
+    .td-cat    { min-width: 150px; }
+
+    /* Category badge + select */
+    .cat-badge {
+      display: inline-block; padding: .15rem .5rem; border-radius: 4px;
+      font-size: .75rem; font-weight: 600; cursor: pointer; user-select: none;
+      background: #e8f0fe; color: #1a56b0; border: 1px solid #c3d7f7;
+      white-space: nowrap;
+    }
+    .cat-badge.none { background: #f5f5f5; color: #999; border-color: #ddd; font-style: italic; }
+    .cat-badge:hover { background: #d0e3ff; }
+
+    .cat-select-wrap { display: none; }
+    .cat-select-wrap.open { display: flex; gap: .3rem; align-items: center; }
+    .cat-select-wrap select { font-size: .83rem; padding: .2rem .4rem; border-radius: 5px; border: 1px solid #aac; }
+    .cat-select-wrap .cancel-btn { font-size: .78rem; color: #888; cursor: pointer; padding: .1rem .3rem; }
+    .cat-select-wrap .cancel-btn:hover { color: #333; }
+    .custom-cat-input {
+      display: none; font-size: .83rem; padding: .2rem .45rem;
+      border: 1px solid #0078d7; border-radius: 5px; width: 160px; outline: none;
+    }
+    .custom-cat-input.visible { display: inline-block; }
+
+    .excl-chk { accent-color: #e74c3c; cursor: pointer; }
+
+    /* Pagination */
+    .pagination {
+      display: flex; align-items: center; gap: .5rem; justify-content: center;
+      padding: .75rem 1.5rem 1.5rem; font-size: .88rem;
+    }
+    .page-btn {
+      padding: .3rem .65rem; border: 1px solid #ccd; border-radius: 5px;
+      background: #fff; cursor: pointer; font-size: .84rem; color: #333;
+    }
+    .page-btn:hover:not(:disabled) { background: #e8f0fe; border-color: #aad; }
+    .page-btn:disabled { opacity: .4; cursor: default; }
+    .page-btn.active { background: #0078d7; color: #fff; border-color: #0078d7; }
+    .page-info { color: #666; font-size: .83rem; }
+
+    /* Rule creation modal */
+    .modal-bg {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      z-index: 200; align-items: center; justify-content: center;
+    }
+    .modal-bg.open { display: flex; }
+    .modal {
+      background: #fff; border-radius: 10px; padding: 1.5rem; width: 460px;
+      max-width: 96vw; box-shadow: 0 8px 32px rgba(0,0,0,.2);
+    }
+    .modal h3 { margin: 0 0 .6rem; font-size: 1rem; }
+    .modal p { margin: 0 0 .9rem; font-size: .88rem; color: #555; line-height: 1.5; }
+    .modal label { display: flex; align-items: flex-start; gap: .5rem;
+                   font-size: .88rem; margin-bottom: .55rem; cursor: pointer; }
+    .modal label input[type=checkbox] { margin-top: 2px; accent-color: #0078d7; flex-shrink: 0; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.1rem; }
+    .merchant-pill {
+      display: inline-block; background: #e8f0fe; color: #1a56b0;
+      padding: .1rem .5rem; border-radius: 4px; font-weight: 600; font-size: .88rem;
+    }
+
+    /* Rules section */
+    .rules-section {
+      margin: 0 1.5rem 2rem; background: #fff; border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07); overflow: hidden;
+    }
+    .rules-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .65rem 1rem; background: #f8f9fa; border-bottom: 1px solid #eee;
+      cursor: pointer; user-select: none;
+    }
+    .rules-header h3 { margin: 0; font-size: .9rem; color: #333; }
+    .rules-header .toggle-icon { color: #666; font-size: .85rem; }
+    .rules-body { display: none; }
+    .rules-body.open { display: block; }
+    .rules-body table { border-radius: 0; box-shadow: none; }
+    .rules-body thead th { background: #f0f2f5; color: #555; }
+    .empty-rules { padding: 1rem; font-size: .88rem; color: #aaa; font-style: italic; text-align: center; }
+
+    .loading-row td { text-align: center; color: #888; padding: 2rem; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Transactions</h1>
+  <a href="/reports">← Reports</a>
+  <a href="/reports/budget">Budget</a>
+  <a href="/reports/goals">Savings Goals</a>
+  <a href="/reports/merchants">Merchants</a>
+  <a href="/reports/paycalendar">Pay-Period Calendar</a>
+</div>
+
+<!-- Filter bar -->
+<div class="filter-bar">
+  <input type="text" id="q" placeholder="Search merchant or name…" oninput="debounceLoad()">
+  <select id="f-category" onchange="loadPage(1)">
+    <option value="">All Categories</option>
+    <option value="__none__">Uncategorized</option>
+  </select>
+  <select id="f-account" onchange="loadPage(1)">
+    <option value="">All Accounts</option>
+    <option value="checking">Checking</option>
+    <option value="savings">Savings</option>
+    <option value="credit card">Credit Card</option>
+  </select>
+  <select id="f-month" onchange="loadPage(1)">
+    <option value="">All Dates</option>
+  </select>
+  <input type="number" id="f-amt-min" placeholder="$ min" step="0.01" min="0"
+         style="width:72px" onchange="loadPage(1)" title="Minimum absolute amount">
+  <input type="number" id="f-amt-max" placeholder="$ max" step="0.01" min="0"
+         style="width:72px" onchange="loadPage(1)" title="Maximum absolute amount">
+  <button class="btn-sm btn-ghost" onclick="clearFilters()">Clear</button>
+  <span class="result-info" id="result-info"></span>
+</div>
+
+<div class="table-wrap">
+  <table id="tx-table">
+    <thead>
+      <tr>
+        <th class="td-date">Date</th>
+        <th>Merchant</th>
+        <th class="right">Amount</th>
+        <th>Account</th>
+        <th>Category</th>
+        <th title="Exclude from spend analysis">Excl.</th>
+      </tr>
+    </thead>
+    <tbody id="tx-body">
+      <tr class="loading-row"><td colspan="6">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="pagination" id="pagination"></div>
+
+<!-- Rules management -->
+<div class="rules-section">
+  <div class="rules-header" onclick="toggleRules()">
+    <h3>Classification Rules <span id="rules-count" style="font-weight:400;color:#888;font-size:.85rem;"></span></h3>
+    <span class="toggle-icon" id="rules-toggle-icon">▶ Show</span>
+  </div>
+  <div class="rules-body" id="rules-body">
+    <div id="rules-content"><div class="empty-rules">Loading rules…</div></div>
+  </div>
+</div>
+
+<!-- Rule-creation modal -->
+<div class="modal-bg" id="rule-modal">
+  <div class="modal">
+    <h3>Category updated</h3>
+    <p id="modal-desc" style="margin-bottom:.35rem"></p>
+    <div id="modal-tx-name" style="font-size:.78rem;color:#888;margin-bottom:.9rem;
+         word-break:break-all;background:#f8f9fa;padding:.35rem .5rem;border-radius:4px"></div>
+
+    <label style="margin-bottom:.4rem">
+      <input type="checkbox" id="chk-create-rule" checked onchange="toggleRuleOptions()">
+      <span>Create a rule — apply <b id="modal-cat"></b> to future transactions whose description contains:</span>
+    </label>
+    <div id="rule-pattern-wrap" style="margin:.2rem 0 .6rem 1.4rem">
+      <input type="text" id="modal-rule-pattern"
+             style="width:100%;padding:.35rem .5rem;border:1px solid #aac;border-radius:5px;font-size:.88rem;font-family:monospace">
+      <div style="font-size:.74rem;color:#888;margin-top:.25rem">
+        Edit to narrow scope — e.g. "synchrony" → "synchrony bank transfer" to avoid matching the credit card
+      </div>
+    </div>
+    <div id="rule-amount-wrap" style="margin:.0rem 0 .85rem 1.4rem">
+      <label style="font-size:.85rem;margin-bottom:.25rem;display:block;font-weight:600;color:#444">Amount:</label>
+      <label style="font-size:.85rem;margin-bottom:.2rem">
+        <input type="radio" name="rule-amt" id="rule-amt-any" value="any" checked> Any amount
+      </label><br>
+      <label style="font-size:.85rem">
+        <input type="radio" name="rule-amt" id="rule-amt-exact" value="exact">
+        Exactly <b id="modal-tx-amount"></b> only
+        <span style="font-size:.76rem;color:#888">(±2¢ tolerance)</span>
+      </label>
+    </div>
+
+    <label>
+      <input type="checkbox" id="chk-apply-existing" checked>
+      <span>Also update all <em>existing</em> transactions matching the pattern above to <b id="modal-cat2"></b></span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn-sm btn-ghost" onclick="cancelModal()">Just this one</button>
+      <button class="btn-sm btn-primary" onclick="confirmModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentPage = 1;
+let totalPages  = 1;
+let allCategories = [];
+let pendingClassify = null;   // {tx_id, category, merchant_norm, rowEl}
+let debounceTimer = null;
+
+function debounceLoad() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => loadPage(1), 350);
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDate(s) {
+  if (!s) return '';
+  const [,m,d] = s.split('-');
+  return `${+m}/${+d}`;
+}
+function fmtAmt(n) {
+  return '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+// ── Categories & month selects ────────────────────────────────────────────
+async function loadCategories() {
+  allCategories = await fetch('/reports/api/transactions/categories').then(r => r.json()).catch(() => []);
+  const sel = document.getElementById('f-category');
+  allCategories.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c; o.textContent = c;
+    sel.appendChild(o);
+  });
+}
+
+function populateMonthSelect() {
+  const sel = document.getElementById('f-month');
+  const now = new Date();
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const lbl = d.toLocaleString('default', {month:'long', year:'numeric'});
+    const o = document.createElement('option');
+    o.value = val; o.textContent = lbl;
+    sel.appendChild(o);
+  }
+}
+
+function clearFilters() {
+  document.getElementById('q').value = '';
+  document.getElementById('f-category').value = '';
+  document.getElementById('f-account').value = '';
+  document.getElementById('f-month').value = '';
+  document.getElementById('f-amt-min').value = '';
+  document.getElementById('f-amt-max').value = '';
+  loadPage(1);
+}
+
+// ── Load transactions ─────────────────────────────────────────────────────
+async function loadPage(page) {
+  currentPage = page;
+  const params = new URLSearchParams({
+    page,
+    per_page: 50,
+    q:                document.getElementById('q').value.trim(),
+    category:         document.getElementById('f-category').value,
+    account_subtype:  document.getElementById('f-account').value,
+    month:            document.getElementById('f-month').value,
+    amt_min:          document.getElementById('f-amt-min').value,
+    amt_max:          document.getElementById('f-amt-max').value,
+  });
+  Object.keys(Object.fromEntries(params)).forEach(k => { if (!params.get(k)) params.delete(k); });
+
+  document.getElementById('tx-body').innerHTML =
+    '<tr class="loading-row"><td colspan="6">Loading…</td></tr>';
+
+  try {
+    const data = await fetch('/reports/api/transactions?' + params).then(r => r.json());
+    totalPages = data.pages;
+    renderTable(data.transactions);
+    renderPagination(data.page, data.pages, data.total);
+    document.getElementById('result-info').textContent =
+      `${data.total.toLocaleString()} transaction${data.total !== 1 ? 's' : ''}`;
+  } catch {
+    document.getElementById('tx-body').innerHTML =
+      '<tr class="loading-row"><td colspan="6" style="color:#c33">Error loading transactions</td></tr>';
+  }
+}
+
+function renderTable(txs) {
+  if (!txs.length) {
+    document.getElementById('tx-body').innerHTML =
+      '<tr class="loading-row"><td colspan="6">No transactions match your filters.</td></tr>';
+    return;
+  }
+
+  document.getElementById('tx-body').innerHTML = txs.map(tx => {
+    const isOut = tx.amount > 0;
+    const amtCls = isOut ? 'out' : 'in';
+    const prefix = isOut ? '' : '+';
+    const excl   = tx.exclude_from_spend ? 'excluded' : '';
+    const cat    = tx.user_category || '';
+    const catHtml = cat
+      ? `<span class="cat-badge" onclick="startEdit(this,'${escHtml(tx.transaction_id)}','${escHtml(tx.merchant_norm)}','${escHtml(tx.name||'')}')">${escHtml(cat)}</span>`
+      : `<span class="cat-badge none" onclick="startEdit(this,'${escHtml(tx.transaction_id)}','${escHtml(tx.merchant_norm)}','${escHtml(tx.name||'')}')">— set category —</span>`;
+
+    return `<tr class="${excl}" data-txid="${escHtml(tx.transaction_id)}">
+      <td class="td-date">${fmtDate(tx.date)}</td>
+      <td class="td-merchant" title="${escHtml(tx.merchant_name || tx.name)}">
+        ${escHtml(tx.merchant_name || tx.name)}
+        <div style="font-size:.72rem;color:#bbb">${escHtml(tx.name !== (tx.merchant_name||tx.name) ? tx.name : '')}</div>
+      </td>
+      <td class="td-amount ${amtCls}">${prefix}${fmtAmt(tx.amount)}</td>
+      <td class="td-acct">${escHtml(tx.account_name)}<div style="font-size:.7rem;color:#ccc">${escHtml(tx.subtype)}</div></td>
+      <td class="td-cat">
+        ${catHtml}
+        <div class="cat-select-wrap" data-txid="${escHtml(tx.transaction_id)}" data-merchant="${escHtml(tx.merchant_norm)}" data-txname="${escHtml(tx.name||'')}">
+          <select onchange="onCategorySelected(this)">
+            <option value="">— select —</option>
+            ${allCategories.map(c => `<option value="${escHtml(c)}"${c===cat?' selected':''}>${escHtml(c)}</option>`).join('')}
+            <option value="__custom__">＋ Custom category…</option>
+          </select>
+          <input type="text" class="custom-cat-input" placeholder="Type & press Enter…"
+                 onkeydown="submitCustomCat(event,this)" onblur="cancelCustomCat(this)">
+          <span class="cancel-btn" onclick="cancelEdit(this)">✕</span>
+        </div>
+      </td>
+      <td>
+        <input type="checkbox" class="excl-chk" ${tx.exclude_from_spend ? 'checked' : ''}
+          onchange="toggleExclude('${escHtml(tx.transaction_id)}', this.checked)">
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Inline category editing ───────────────────────────────────────────────
+function startEdit(badgeEl, txId, merchantNorm, txName) {
+  document.querySelectorAll('.cat-select-wrap.open').forEach(el => {
+    el.classList.remove('open');
+    el.previousElementSibling && (el.previousElementSibling.style.display = '');
+  });
+  const wrap = badgeEl.nextElementSibling;
+  // Store txName on the wrapper so onCategorySelected can read it
+  if (txName !== undefined) wrap.dataset.txname = txName;
+  badgeEl.style.display = 'none';
+  wrap.classList.add('open');
+  wrap.querySelector('select').focus();
+}
+
+function submitCustomCat(e, inputEl) {
+  if (e.key === 'Escape') { cancelCustomCat(inputEl); return; }
+  if (e.key !== 'Enter') return;
+  const cat = inputEl.value.trim();
+  if (!cat) { cancelCustomCat(inputEl); return; }
+
+  // Add to known categories so it appears in future dropdowns
+  if (!allCategories.includes(cat)) {
+    allCategories.push(cat);
+    allCategories.sort();
+  }
+
+  // Restore the select (hidden), hide the input
+  const wrap = inputEl.closest('.cat-select-wrap');
+  inputEl.classList.remove('visible');
+  wrap.querySelector('select').style.display = '';
+
+  // Proceed as if the user had picked this from the dropdown
+  const txId         = wrap.dataset.txid;
+  const merchantNorm = wrap.dataset.merchant || '';
+  const txName       = wrap.dataset.txname   || '';
+  const row          = wrap.closest('tr');
+  const amtCell      = row.querySelector('.td-amount');
+  const txAmount     = amtCell ? Math.abs(parseFloat(amtCell.textContent.replace(/[^0-9.]/g,'')) || 0) : null;
+
+  wrap.classList.remove('open');
+  wrap.previousElementSibling.style.display = '';   // show badge again temporarily
+
+  pendingClassify = { tx_id: txId, category: cat, merchant_norm: merchantNorm, tx_name: txName, tx_amount: txAmount, row };
+  document.getElementById('modal-desc').innerHTML = `Setting <b>${escHtml(cat)}</b> for this transaction:`;
+  document.getElementById('modal-tx-name').textContent = txName || merchantNorm || '(unknown)';
+  document.getElementById('modal-cat').textContent  = cat;
+  document.getElementById('modal-cat2').textContent = cat;
+  const amtLabel = txAmount != null ? '$' + txAmount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  document.getElementById('modal-tx-amount').textContent = amtLabel;
+  document.getElementById('rule-amt-any').checked = true;
+  document.getElementById('modal-rule-pattern').value = merchantNorm;
+  document.getElementById('rule-modal').classList.add('open');
+  setTimeout(() => document.getElementById('modal-rule-pattern').select(), 50);
+}
+
+function cancelCustomCat(inputEl) {
+  inputEl.classList.remove('visible');
+  const wrap = inputEl.closest('.cat-select-wrap');
+  wrap.querySelector('select').style.display = '';
+  // If nothing was typed, close the whole editor
+  cancelEdit(wrap.querySelector('.cancel-btn'));
+}
+
+function cancelEdit(cancelBtn) {
+  const wrap = cancelBtn.closest('.cat-select-wrap');
+  wrap.classList.remove('open');
+  const badge = wrap.previousElementSibling;
+  badge.style.display = '';
+}
+
+// ── Custom category inline input ─────────────────────────────────────────────
+function onCategorySelected(selectEl) {
+  const cat  = selectEl.value;
+  if (!cat) return;
+
+  if (cat === '__custom__') {
+    selectEl.value = '';           // reset so select looks blank
+    selectEl.style.display = 'none';
+    const inp = selectEl.nextElementSibling;   // .custom-cat-input
+    inp.classList.add('visible');
+    inp.value = '';
+    inp.focus();
+    return;
+  }
+  const wrap         = selectEl.closest('.cat-select-wrap');
+  const txId         = wrap.dataset.txid;
+  const merchantNorm = wrap.dataset.merchant || '';
+  const txName       = wrap.dataset.txname   || '';
+  const row          = wrap.closest('tr');
+  // Amount comes from the displayed cell in the same row
+  const amtCell      = row.querySelector('.td-amount');
+  const txAmount     = amtCell ? Math.abs(parseFloat(amtCell.textContent.replace(/[^0-9.]/g,'')) || 0) : null;
+
+  pendingClassify = { tx_id: txId, category: cat, merchant_norm: merchantNorm, tx_name: txName, tx_amount: txAmount, row };
+
+  document.getElementById('modal-desc').innerHTML =
+    `Setting <b>${escHtml(cat)}</b> for this transaction:`;
+  document.getElementById('modal-tx-name').textContent = txName || merchantNorm || '(unknown)';
+  document.getElementById('modal-cat').textContent  = cat;
+  document.getElementById('modal-cat2').textContent = cat;
+
+  // Amount radio label
+  const amtLabel = txAmount != null ? '$' + txAmount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  document.getElementById('modal-tx-amount').textContent = amtLabel;
+  document.getElementById('rule-amt-any').checked   = true;  // reset to "any amount" default
+
+  // Pre-fill with merchant_norm; user can narrow it
+  document.getElementById('modal-rule-pattern').value = merchantNorm;
+
+  document.getElementById('rule-modal').classList.add('open');
+  setTimeout(() => document.getElementById('modal-rule-pattern').select(), 50);
+}
+
+function cancelModal() {
+  // Save just this transaction (no rule)
+  if (pendingClassify) {
+    saveClassify(pendingClassify.tx_id, pendingClassify.category,
+                 pendingClassify.merchant_norm, false, false, pendingClassify.row);
+  }
+  closeModal();
+}
+
+function toggleRuleOptions() {
+  const show = document.getElementById('chk-create-rule').checked;
+  document.getElementById('rule-pattern-wrap').style.opacity = show ? '' : '.4';
+  document.getElementById('rule-amount-wrap').style.opacity  = show ? '' : '.4';
+}
+
+function confirmModal() {
+  if (!pendingClassify) { closeModal(); return; }
+  const createRule    = document.getElementById('chk-create-rule').checked;
+  const applyExisting = document.getElementById('chk-apply-existing').checked;
+  const rulePattern   = document.getElementById('modal-rule-pattern').value.trim().toLowerCase()
+                        || pendingClassify.merchant_norm;
+  const useExactAmt   = document.getElementById('rule-amt-exact').checked;
+  const amountExact   = (createRule && useExactAmt && pendingClassify.tx_amount != null)
+                        ? pendingClassify.tx_amount : null;
+
+  saveClassify(
+    pendingClassify.tx_id, pendingClassify.category,
+    rulePattern, createRule, applyExisting, pendingClassify.row, amountExact
+  );
+  closeModal();
+}
+
+function closeModal() {
+  document.getElementById('rule-modal').classList.remove('open');
+  // Close inline select if open
+  if (pendingClassify && pendingClassify.row) {
+    const wrap = pendingClassify.row.querySelector('.cat-select-wrap.open');
+    if (wrap) {
+      wrap.classList.remove('open');
+      wrap.previousElementSibling.style.display = '';
+    }
+  }
+  pendingClassify = null;
+}
+
+async function saveClassify(txId, category, merchantNorm, createRule, applyExisting, rowEl, amountExact = null) {
+  try {
+    const body = {
+      transaction_id:   txId,
+      category,
+      create_rule:      createRule,
+      rule_match_value: merchantNorm,
+      apply_to_existing:applyExisting,
+    };
+    if (amountExact != null) body.amount_exact = amountExact;
+    const resp = await fetch('/reports/api/transactions/classify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+
+    // Update the badge in the row
+    if (rowEl) {
+      const badge = rowEl.querySelector('.cat-badge');
+      if (badge) {
+        badge.textContent = category;
+        badge.classList.remove('none');
+      }
+    }
+
+    if (resp.affected > 0) {
+      // Reload the table since other rows may have changed
+      setTimeout(() => loadPage(currentPage), 300);
+    }
+
+    if (createRule) loadRules();
+  } catch (e) {
+    console.error('classify error', e);
+  }
+}
+
+async function toggleExclude(txId, excluded) {
+  await fetch('/reports/api/transactions/classify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transaction_id: txId, exclude_from_spend: excluded }),
+  });
+  const row = document.querySelector(`tr[data-txid="${txId}"]`);
+  if (row) row.classList.toggle('excluded', excluded);
+}
+
+// ── Pagination ────────────────────────────────────────────────────────────
+function renderPagination(page, pages, total) {
+  const p = document.getElementById('pagination');
+  if (pages <= 1) { p.innerHTML = ''; return; }
+
+  let html = `<button class="page-btn" onclick="loadPage(${page-1})" ${page===1?'disabled':''}>&#8592; Prev</button>`;
+
+  // Show a window of page numbers
+  const WINDOW = 5;
+  let start = Math.max(1, page - Math.floor(WINDOW/2));
+  let end   = Math.min(pages, start + WINDOW - 1);
+  start = Math.max(1, end - WINDOW + 1);
+
+  if (start > 1) html += `<button class="page-btn" onclick="loadPage(1)">1</button><span style="color:#aaa">…</span>`;
+  for (let i = start; i <= end; i++) {
+    html += `<button class="page-btn${i===page?' active':''}" onclick="loadPage(${i})">${i}</button>`;
+  }
+  if (end < pages) html += `<span style="color:#aaa">…</span><button class="page-btn" onclick="loadPage(${pages})">${pages}</button>`;
+
+  html += `<button class="page-btn" onclick="loadPage(${page+1})" ${page===pages?'disabled':''}>Next &#8594;</button>`;
+  html += `<span class="page-info">${total.toLocaleString()} total</span>`;
+  p.innerHTML = html;
+}
+
+// ── Rules management ──────────────────────────────────────────────────────
+let rulesOpen = false;
+
+function toggleRules() {
+  rulesOpen = !rulesOpen;
+  document.getElementById('rules-body').classList.toggle('open', rulesOpen);
+  document.getElementById('rules-toggle-icon').textContent = rulesOpen ? '▼ Hide' : '▶ Show';
+  if (rulesOpen) loadRules();
+}
+
+async function loadRules() {
+  const rules = await fetch('/reports/api/classification_rules').then(r => r.json()).catch(() => []);
+  document.getElementById('rules-count').textContent = `(${rules.length})`;
+
+  if (!rules.length) {
+    document.getElementById('rules-content').innerHTML =
+      '<div class="empty-rules">No rules yet. Categorize a transaction and choose "Create a rule" to add one.</div>';
+    return;
+  }
+
+  let html = `<table><thead><tr>
+    <th>Pattern</th><th>Amount</th>
+    <th>Category</th><th>Exclude</th><th>Created</th><th></th>
+  </tr></thead><tbody>`;
+
+  for (const r of rules) {
+    const amtLabel = r.amount_exact != null
+      ? '$' + Number(r.amount_exact).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
+      : '<span style="color:#aaa">any</span>';
+    html += `<tr>
+      <td><b>${escHtml(r.match_value)}</b></td>
+      <td>${amtLabel}</td>
+      <td>${escHtml(r.user_category || '—')}</td>
+      <td>${r.exclude_from_spend ? 'Yes' : 'No'}</td>
+      <td style="font-size:.75rem;color:#aaa">${(r.created_at||'').slice(0,10)}</td>
+      <td><button class="btn-sm btn-danger" onclick="deleteRule(${r.rule_id}, this)">Delete</button></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('rules-content').innerHTML = html;
+}
+
+async function deleteRule(ruleId, btn) {
+  if (!confirm('Delete this rule? Future transactions will no longer be auto-categorized by it.')) return;
+  btn.disabled = true;
+  await fetch(`/reports/api/classification_rules/${ruleId}`, { method: 'DELETE' });
+  loadRules();
+}
+
+// Close modal on backdrop click
+document.getElementById('rule-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('rule-modal')) cancelModal();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async () => {
+  populateMonthSelect();
+  await loadCategories();
+  loadPage(1);
+  // Pre-load rule count
+  fetch('/reports/api/classification_rules').then(r => r.json()).then(rules => {
+    document.getElementById('rules-count').textContent = `(${rules.length})`;
+  }).catch(() => {});
+})();
+</script>
+</body>
+</html>

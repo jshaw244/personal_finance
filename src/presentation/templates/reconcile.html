@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Statement Reconciliation</title>
+  <title>Statements</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
@@ -15,111 +15,143 @@
     .topbar a { color: #aad4f5; font-size: .9rem; text-decoration: none; }
     .topbar a:hover { text-decoration: underline; }
 
-    .page { padding: 1.25rem 1.5rem 3rem; max-width: 1300px; }
+    .page { padding: 1.25rem 1.5rem 3rem; max-width: 1100px; }
 
-    /* Upload card */
-    .upload-card {
+    /* ── Cards ── */
+    .card {
       background: #fff; border-radius: 10px;
       box-shadow: 0 1px 6px rgba(0,0,0,.08);
       padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;
     }
-    .upload-card h2 { margin: 0 0 1rem; font-size: 1rem; color: #333; }
+    .card h2 { margin: 0 0 1rem; font-size: 1rem; color: #1a1a2e; }
+
     .form-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
     .form-group { display: flex; flex-direction: column; gap: .3rem; }
-    .form-group label { font-size: .8rem; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: .04em; }
+    .form-group label { font-size: .78rem; font-weight: 600; color: #555;
+                        text-transform: uppercase; letter-spacing: .04em; }
     .form-group select,
-    .form-group input[type=text] {
-      padding: .4rem .65rem; border: 1px solid #ccd; border-radius: 6px;
+    .form-group input[type=text],
+    .form-group input[type=number] {
+      padding: .38rem .65rem; border: 1px solid #ccd; border-radius: 6px;
       font-size: .9rem; background: #fafafa; min-width: 160px;
     }
-    .file-input-wrap {
-      display: flex; flex-direction: column; gap: .3rem;
-    }
-    .file-input-wrap label { font-size: .8rem; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: .04em; }
-    .file-input-wrap input[type=file] { font-size: .88rem; }
-    .btn-upload {
-      padding: .45rem 1.1rem; background: #0078d7; color: #fff;
-      border: none; border-radius: 6px; cursor: pointer; font-size: .9rem;
-      align-self: flex-end;
-    }
-    .btn-upload:hover { background: #005fa3; }
-    .btn-upload:disabled { background: #aaa; cursor: default; }
+    .file-wrap { display: flex; flex-direction: column; gap: .3rem; }
+    .file-wrap label { font-size: .78rem; font-weight: 600; color: #555;
+                       text-transform: uppercase; letter-spacing: .04em; }
+    .file-wrap input[type=file] { font-size: .87rem; }
 
-    .note { font-size: .78rem; color: #888; margin-top: .6rem; }
-
-    /* Status / error banner */
-    .banner {
-      padding: .6rem 1rem; border-radius: 6px; font-size: .88rem; margin-bottom: 1rem;
-      display: none;
+    .btn {
+      padding: .42rem 1rem; border: none; border-radius: 6px;
+      cursor: pointer; font-size: .9rem; align-self: flex-end;
     }
+    .btn-primary { background: #0078d7; color: #fff; }
+    .btn-primary:hover { background: #005fa3; }
+    .btn-primary:disabled { background: #aaa; cursor: default; }
+    .btn-ghost { background: #e9ecef; color: #555; }
+    .btn-ghost:hover { background: #dde; }
+
+    .note { font-size: .77rem; color: #888; margin-top: .6rem; }
+
+    /* ── Extract preview ── */
+    .extract-preview {
+      display: none; margin-top: .9rem;
+      background: #e8f4e8; border: 1px solid #b8ddb8;
+      border-radius: 7px; padding: .75rem 1rem;
+    }
+    .extract-preview.visible { display: flex; gap: 2rem; align-items: center; flex-wrap: wrap; }
+    .extract-preview .ep-val { font-size: 1.4rem; font-weight: 800; color: #155724; }
+    .extract-preview .ep-lbl { font-size: .75rem; color: #2d6a30; text-transform: uppercase; letter-spacing: .04em; }
+    .extract-preview .ep-date { font-size: .85rem; color: #444; }
+    .extract-error { display: none; margin-top: .75rem; background: #f8d7da; border: 1px solid #f5c6cb;
+                     border-radius: 7px; padding: .6rem 1rem; font-size: .87rem; color: #721c24; }
+    .extract-error.visible { display: block; }
+
+    /* ── Balances table ── */
+    .bal-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    .bal-table th {
+      background: #f8f9fa; padding: .4rem .75rem; text-align: left;
+      font-size: .74rem; text-transform: uppercase; letter-spacing: .04em;
+      color: #666; border-bottom: 2px solid #dee2e6;
+    }
+    .bal-table th.right { text-align: right; }
+    .bal-table td { padding: .38rem .75rem; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    .bal-table td.right { text-align: right; font-variant-numeric: tabular-nums; font-family: monospace; }
+    .bal-table tr:hover td { background: #fafbff; }
+    .bal-table tr:last-child td { border-bottom: none; }
+    .badge-type {
+      display: inline-block; padding: .12rem .42rem; border-radius: 4px;
+      font-size: .71rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+      background: #e8f0fe; color: #1a56b0;
+    }
+    .badge-plaid { background: #d4edda; color: #155724; }
+    .del-btn { font-size: .78rem; color: #c33; background: none; border: none;
+               cursor: pointer; padding: .1rem .3rem; }
+    .del-btn:hover { text-decoration: underline; }
+    .empty-msg { padding: 1.5rem; text-align: center; color: #aaa; font-style: italic; font-size: .88rem; }
+
+    /* ── Banner ── */
+    .banner { padding: .6rem 1rem; border-radius: 6px; font-size: .88rem; margin-bottom: 1rem; display: none; }
     .banner.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; display: block; }
     .banner.info  { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; display: block; }
+    .banner.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; display: block; }
 
-    /* Summary bar */
+    /* ── Collapsible reconcile section ── */
+    .collapsible-header {
+      display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; user-select: none;
+      background: #fff; border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,.08);
+      padding: .9rem 1.5rem; margin-bottom: 0;
+    }
+    .collapsible-header h2 { margin: 0; font-size: .95rem; color: #333; }
+    .collapsible-header .toggle-icon { color: #666; font-size: .85rem; }
+    .collapsible-body { display: none; }
+    .collapsible-body.open { display: block; }
+    .collapsible-inner {
+      background: #fff; border-top: 1px solid #eee;
+      border-radius: 0 0 10px 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.06);
+      padding: 1.25rem 1.5rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    /* ── Reconcile results (re-used from old page) ── */
     .summary-bar {
       display: flex; gap: 1px; border-radius: 8px; overflow: hidden;
       margin-bottom: 1.25rem; font-size: .88rem;
     }
     .summary-bar .seg { flex: 1; padding: .65rem 1rem; text-align: center; }
-    .seg-total    { background: #e8eef8; color: #1a3a6e; }
-    .seg-matched  { background: #d4edda; color: #155724; }
-    .seg-stmt     { background: #fff3cd; color: #856404; }
-    .seg-db       { background: #f8d7da; color: #721c24; }
+    .seg-total   { background: #e8eef8; color: #1a3a6e; }
+    .seg-matched { background: #d4edda; color: #155724; }
+    .seg-stmt    { background: #fff3cd; color: #856404; }
+    .seg-db      { background: #f8d7da; color: #721c24; }
     .seg label { display: block; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .75; }
     .seg .big  { font-size: 1.3rem; font-weight: 800; }
     .seg .sub  { font-size: .75rem; margin-top: .1rem; opacity: .8; }
-
-    /* Match rate bar */
     .match-bar-wrap { margin-bottom: 1.25rem; }
     .match-bar-wrap label { font-size: .78rem; color: #555; margin-bottom: .25rem; display: block; }
     .match-bar-bg { background: #e0e0e0; border-radius: 99px; height: 10px; overflow: hidden; }
     .match-bar-fill { height: 100%; border-radius: 99px; background: #28a745; transition: width .4s; }
-
-    /* Tabs */
     .tabs { display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: 1rem; }
     .tab-btn {
       padding: .5rem 1.1rem; border: none; background: none; cursor: pointer;
       font-size: .88rem; color: #666; border-bottom: 2px solid transparent;
-      margin-bottom: -2px; transition: color .15s;
+      margin-bottom: -2px;
     }
     .tab-btn.active { color: #0078d7; border-bottom-color: #0078d7; font-weight: 600; }
     .tab-btn:hover:not(.active) { color: #333; }
-
-    /* Tables */
     .results-section { display: none; }
     .results-section.active { display: block; }
-
     .data-table { width: 100%; border-collapse: collapse; font-size: .84rem; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-    .data-table thead th {
-      background: #f8f9fa; padding: .45rem .75rem; text-align: left;
-      font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #666;
-      border-bottom: 2px solid #dee2e6; white-space: nowrap;
-    }
+    .data-table thead th { background: #f8f9fa; padding: .45rem .75rem; text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #666; border-bottom: 2px solid #dee2e6; white-space: nowrap; }
     .data-table thead th.right { text-align: right; }
     .data-table tbody td { padding: .35rem .75rem; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
     .data-table tbody td.right { text-align: right; font-variant-numeric: tabular-nums; font-family: monospace; }
     .data-table tbody tr:hover { background: #fafafa; }
     .data-table tbody tr:last-child td { border-bottom: none; }
-
-    .badge {
-      display: inline-block; padding: .15rem .45rem; border-radius: 4px;
-      font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
-    }
-    .badge-match  { background: #d4edda; color: #155724; }
-    .badge-stmt   { background: #fff3cd; color: #856404; }
-    .badge-db     { background: #f8d7da; color: #721c24; }
-
+    .badge-match { background: #d4edda; color: #155724; display: inline-block; padding: .15rem .45rem; border-radius: 4px; font-size: .72rem; font-weight: 700; text-transform: uppercase; }
     .diff-amt { font-weight: 700; color: #c33; font-family: monospace; }
     .subdesc  { font-size: .75rem; color: #888; }
-
-    /* History panel */
-    .history-panel {
-      background: #fff; border-radius: 10px;
-      box-shadow: 0 1px 6px rgba(0,0,0,.08);
-      padding: 1rem 1.25rem; margin-top: 1.5rem;
-    }
-    .history-panel h3 { margin: 0 0 .75rem; font-size: .95rem; color: #444; }
-
     .loading { padding: 2rem; text-align: center; color: #888; }
     .empty   { padding: 1.5rem; text-align: center; color: #aaa; font-style: italic; font-size: .9rem; }
   </style>
@@ -127,100 +159,146 @@
 <body>
 
 <div class="topbar">
-  <h1>Statement Reconciliation</h1>
+  <h1>Statements</h1>
   <a href="/reports">← Reports</a>
-  <a href="/reports/monthly">Monthly Cashflow</a>
+  <a href="/reports/budget">Budget</a>
+  <a href="/reports/goals">Savings Goals</a>
   <a href="/reports/paycalendar">Pay-Period Calendar</a>
+  <a href="/reports/transactions">Transactions</a>
 </div>
 
 <div class="page">
 
-  <!-- Upload form -->
-  <div class="upload-card">
-    <h2>Upload Bank Statement (CSV)</h2>
+  <!-- ── Section 1: Current Account Balances ───────────────────── -->
+  <div class="card">
+    <h2>Account Balances</h2>
+    <div id="bal-banner" class="banner"></div>
+    <div id="bal-table-wrap"><div class="loading">Loading…</div></div>
+  </div>
+
+  <!-- ── Section 2: Update Balance from Statement ──────────────── -->
+  <div class="card">
+    <h2>Update Balance from Statement</h2>
     <div class="form-row">
       <div class="form-group">
-        <label>Account Type</label>
-        <select id="account-type">
-          <option value="checking">Checking</option>
-          <option value="savings">Savings</option>
-          <option value="credit">Credit Card</option>
-          <option value="mortgage">Mortgage</option>
-          <option value="retirement">Retirement / Brokerage</option>
-        </select>
+        <label>Institution</label>
+        <input type="text" id="b-institution" placeholder="e.g. Synchrony, Schwab" list="institution-list">
+        <datalist id="institution-list">
+          <option value="Synchrony">
+          <option value="Charles Schwab">
+          <option value="Fidelity">
+          <option value="Vanguard">
+        </datalist>
       </div>
       <div class="form-group">
-        <label>Institution (optional)</label>
-        <input type="text" id="institution" placeholder="e.g. Fifth Third, Chase…">
+        <label>Account Name</label>
+        <input type="text" id="b-account-name" placeholder="e.g. Amazon Card, Brokerage">
       </div>
-      <div class="file-input-wrap">
-        <label>Statement CSV</label>
-        <input type="file" id="file-input" accept=".csv,.tsv,.txt">
+      <div class="form-group">
+        <label>Account Type</label>
+        <select id="b-account-type">
+          <option value="credit">Credit Card</option>
+          <option value="brokerage">Brokerage</option>
+          <option value="checking">Checking</option>
+          <option value="savings">Savings</option>
+          <option value="mortgage">Mortgage</option>
+        </select>
       </div>
-      <button class="btn-upload" id="upload-btn" onclick="upload()">Reconcile</button>
+      <div class="file-wrap">
+        <label>Statement PDF (optional)</label>
+        <input type="file" id="b-file" accept=".pdf" onchange="onFileChange()">
+      </div>
+      <button class="btn btn-primary" id="b-save-btn" onclick="saveBalance()">Save Balance</button>
+    </div>
+
+    <!-- Balance extracted from PDF -->
+    <div class="extract-preview" id="extract-preview">
+      <div>
+        <div class="ep-lbl" id="extract-label">Balance</div>
+        <div class="ep-val" id="extract-val">—</div>
+      </div>
+      <div class="ep-date" id="extract-date"></div>
+      <div style="font-size:.8rem;color:#555">Auto-extracted from PDF. Override below if needed.</div>
+    </div>
+    <div class="extract-error" id="extract-error"></div>
+
+    <!-- Manual override -->
+    <div style="margin-top:.9rem;display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap">
+      <div class="form-group">
+        <label>Balance (manual override)</label>
+        <input type="number" id="b-manual-balance" step="0.01" min="0" placeholder="e.g. 1234.56" style="min-width:140px">
+      </div>
+      <div class="form-group">
+        <label>Statement Date (manual override)</label>
+        <input type="text" id="b-manual-date" placeholder="YYYY-MM-DD" style="min-width:130px">
+      </div>
     </div>
     <p class="note">
-      Most banks offer CSV export under Account Activity or Statements.
-      The file should have columns for Date, Description, and Amount (or Debit/Credit).
-      Checking/savings: export from the bank website. Credit cards: export from the card portal.
-      Mortgage and retirement statements are stored for reference (no Plaid data to compare).
+      Upload a Synchrony or Schwab PDF — balance is extracted automatically.
+      Use the manual fields to correct or enter a balance without a file.
     </p>
   </div>
 
-  <div class="banner" id="banner"></div>
-
-  <!-- Results (hidden until upload) -->
-  <div id="results" style="display:none">
-
-    <div class="summary-bar">
-      <div class="seg seg-total">
-        <label>Statement Transactions</label>
-        <div class="big" id="sum-stmt">—</div>
-        <div class="sub" id="sum-range">—</div>
-      </div>
-      <div class="seg seg-matched">
-        <label>Matched in App</label>
-        <div class="big" id="sum-matched">—</div>
-        <div class="sub" id="sum-rate">—</div>
-      </div>
-      <div class="seg seg-stmt">
-        <label>Only in Statement</label>
-        <div class="big" id="sum-only-stmt">—</div>
-        <div class="sub">not found in app</div>
-      </div>
-      <div class="seg seg-db">
-        <label>Only in App</label>
-        <div class="big" id="sum-only-db">—</div>
-        <div class="sub">not in statement</div>
-      </div>
-    </div>
-
-    <div class="match-bar-wrap">
-      <label id="match-bar-label">Match rate</label>
-      <div class="match-bar-bg"><div class="match-bar-fill" id="match-bar" style="width:0%"></div></div>
-    </div>
-
-    <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('matched')">
-        Matched <span id="tab-count-matched"></span>
-      </button>
-      <button class="tab-btn" onclick="switchTab('only_statement')">
-        Only in Statement <span id="tab-count-only-stmt"></span>
-      </button>
-      <button class="tab-btn" onclick="switchTab('only_db')">
-        Only in App <span id="tab-count-only-db"></span>
-      </button>
-    </div>
-
-    <div id="tab-matched" class="results-section active"></div>
-    <div id="tab-only_statement" class="results-section"></div>
-    <div id="tab-only_db" class="results-section"></div>
+  <!-- ── Section 3: Transaction Reconciliation (collapsible) ───── -->
+  <div class="collapsible-header" onclick="toggleRecon()">
+    <h2>Transaction Reconciliation <span style="font-weight:400;color:#888;font-size:.85rem">(CSV comparison against Plaid)</span></h2>
+    <span class="toggle-icon" id="recon-toggle-icon">▶ Show</span>
   </div>
+  <div class="collapsible-body" id="recon-body">
+    <div class="collapsible-inner">
+      <div class="form-row" style="margin-bottom:.75rem">
+        <div class="form-group">
+          <label>Account Type</label>
+          <select id="account-type">
+            <option value="checking">Checking</option>
+            <option value="savings">Savings</option>
+            <option value="credit">Credit Card</option>
+            <option value="mortgage">Mortgage</option>
+            <option value="retirement">Retirement / Brokerage</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Institution (optional)</label>
+          <input type="text" id="institution" placeholder="e.g. Fifth Third, Chase…">
+        </div>
+        <div class="file-wrap">
+          <label>Statement File (CSV or PDF)</label>
+          <input type="file" id="file-input" accept=".csv,.tsv,.txt,.pdf">
+        </div>
+        <button class="btn btn-primary" id="upload-btn" onclick="upload()">Reconcile</button>
+      </div>
+      <p class="note" style="margin-top:0">
+        CSV files need Date, Description, and Amount columns.
+        Checking/savings: export from bank website. Credit cards: export from card portal.
+      </p>
 
-  <!-- Upload history -->
-  <div class="history-panel">
-    <h3>Recent Uploads</h3>
-    <div id="history-list"><div class="loading">Loading…</div></div>
+      <div class="banner" id="recon-banner"></div>
+      <div id="results" style="display:none">
+        <div class="summary-bar">
+          <div class="seg seg-total"><label>Statement Transactions</label><div class="big" id="sum-stmt">—</div><div class="sub" id="sum-range">—</div></div>
+          <div class="seg seg-matched"><label>Matched in App</label><div class="big" id="sum-matched">—</div><div class="sub" id="sum-rate">—</div></div>
+          <div class="seg seg-stmt"><label>Only in Statement</label><div class="big" id="sum-only-stmt">—</div><div class="sub">not found in app</div></div>
+          <div class="seg seg-db"><label>Only in App</label><div class="big" id="sum-only-db">—</div><div class="sub">not in statement</div></div>
+        </div>
+        <div class="match-bar-wrap">
+          <label id="match-bar-label">Match rate</label>
+          <div class="match-bar-bg"><div class="match-bar-fill" id="match-bar" style="width:0%"></div></div>
+        </div>
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchTab('matched')">Matched <span id="tab-count-matched"></span></button>
+          <button class="tab-btn" onclick="switchTab('only_statement')">Only in Statement <span id="tab-count-only-stmt"></span></button>
+          <button class="tab-btn" onclick="switchTab('only_db')">Only in App <span id="tab-count-only-db"></span></button>
+        </div>
+        <div id="tab-matched" class="results-section active"></div>
+        <div id="tab-only_statement" class="results-section"></div>
+        <div id="tab-only_db" class="results-section"></div>
+      </div>
+
+      <div class="history-panel" style="background:#f8f9fa;border-radius:8px;padding:1rem 1.25rem;margin-top:1.5rem">
+        <h3 style="margin:0 0 .75rem;font-size:.92rem;color:#444">Recent CSV Uploads</h3>
+        <div id="history-list"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -235,10 +313,185 @@ function escHtml(s) {
 }
 function fmtDate(s) {
   if (!s) return '';
-  const [yr,mn,dy] = s.split('-').map(Number);
-  return `${mn}/${dy}/${yr}`;
+  const parts = s.split('-').map(Number);
+  return `${parts[1]}/${parts[2]}/${parts[0]}`;
+}
+function showBalBanner(msg, type) {
+  const el = document.getElementById('bal-banner');
+  el.textContent = msg; el.className = 'banner ' + type;
 }
 
+// ── Balance table ─────────────────────────────────────────────────────────────
+async function loadBalances() {
+  try {
+    const [plaid, manual] = await Promise.all([
+      fetch('/reports/api/account_balances').then(r => r.json()),
+      fetch('/reports/api/statement/balances').then(r => r.json()),
+    ]);
+    renderBalTable(plaid, manual);
+  } catch(e) {
+    document.getElementById('bal-table-wrap').innerHTML =
+      '<div class="empty">Could not load balances</div>';
+  }
+}
+
+function renderBalTable(plaid, manual) {
+  const all = [
+    ...plaid.map(a => ({ ...a, source: 'plaid' })),
+    ...manual.map(m => ({
+      name: m.account_name,
+      institution: m.institution,
+      type: m.account_type,
+      current: m.balance,
+      updated_at: (m.statement_date || m.uploaded_at || '').slice(0,10),
+      source: 'manual',
+      manual_id: m.id,
+    })),
+  ];
+
+  if (!all.length) {
+    document.getElementById('bal-table-wrap').innerHTML =
+      '<div class="empty">No accounts yet. Upload a statement above to add one.</div>';
+    return;
+  }
+
+  let h = `<table class="bal-table"><thead><tr>
+    <th>Institution</th><th>Account</th><th>Type</th>
+    <th class="right">Balance</th><th>As Of</th><th>Source</th><th></th>
+  </tr></thead><tbody>`;
+
+  for (const a of all) {
+    const srcBadge = a.source === 'plaid'
+      ? '<span class="badge-type badge-plaid">Plaid</span>'
+      : '<span class="badge-type">Statement</span>';
+    const delBtn = a.source === 'manual'
+      ? `<button class="del-btn" onclick="deleteBalance(${a.manual_id},this)" title="Remove">✕</button>`
+      : '';
+    h += `<tr>
+      <td>${escHtml(a.institution || '—')}</td>
+      <td>${escHtml(a.name)}</td>
+      <td>${escHtml(a.type || a.subtype || '—')}</td>
+      <td class="right">${fmt(a.current)}</td>
+      <td style="font-size:.82rem;color:#666">${fmtDate(a.updated_at) || '—'}</td>
+      <td>${srcBadge}</td>
+      <td>${delBtn}</td>
+    </tr>`;
+  }
+  h += '</tbody></table>';
+  document.getElementById('bal-table-wrap').innerHTML = h;
+}
+
+async function deleteBalance(id, btn) {
+  if (!confirm('Remove this balance entry?')) return;
+  btn.disabled = true;
+  await fetch(`/reports/api/statement/balance/${id}`, { method: 'DELETE' });
+  loadBalances();
+}
+
+// ── PDF extraction ────────────────────────────────────────────────────────────
+let extractedBalance = null;
+let extractedDate    = null;
+
+async function onFileChange() {
+  const file = document.getElementById('b-file').files[0];
+  document.getElementById('extract-preview').classList.remove('visible');
+  document.getElementById('extract-error').classList.remove('visible');
+  extractedBalance = null;
+  extractedDate    = null;
+  if (!file) return;
+
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const data = await fetch('/reports/api/statement/extract_balance', {
+      method: 'POST', body: form,
+    }).then(r => r.json());
+
+    if (data.balance != null) {
+      extractedBalance = data.balance;
+      extractedDate    = data.statement_date || null;
+      document.getElementById('extract-val').textContent  = fmt(data.balance);
+      document.getElementById('extract-label').textContent = data.label || 'Balance';
+      document.getElementById('extract-date').textContent  =
+        data.statement_date ? 'Statement date: ' + fmtDate(data.statement_date) : '';
+      document.getElementById('extract-preview').classList.add('visible');
+    } else {
+      const errEl = document.getElementById('extract-error');
+      errEl.textContent = 'Could not auto-detect balance. Enter it manually below.';
+      errEl.classList.add('visible');
+    }
+  } catch(e) {
+    const errEl = document.getElementById('extract-error');
+    errEl.textContent = 'Error reading PDF: ' + e.message;
+    errEl.classList.add('visible');
+  }
+}
+
+async function saveBalance() {
+  const institution = document.getElementById('b-institution').value.trim();
+  const accountName = document.getElementById('b-account-name').value.trim();
+  const accountType = document.getElementById('b-account-type').value;
+  const manualBal   = document.getElementById('b-manual-balance').value.trim();
+  const manualDate  = document.getElementById('b-manual-date').value.trim();
+  const file        = document.getElementById('b-file').files[0];
+
+  if (!institution) { showBalBanner('Institution is required.', 'error'); return; }
+  if (!accountName) { showBalBanner('Account name is required.', 'error'); return; }
+
+  const balance = manualBal ? parseFloat(manualBal) : extractedBalance;
+  if (balance == null || isNaN(balance)) {
+    showBalBanner('Enter a balance or upload a PDF with a detectable balance.', 'error');
+    return;
+  }
+
+  const stmtDate = manualDate || extractedDate || null;
+  const btn = document.getElementById('b-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  // If file available and we already extracted, just POST JSON (avoid re-uploading)
+  const body = JSON.stringify({
+    institution, account_name: accountName, account_type: accountType,
+    balance, statement_date: stmtDate,
+    source_file: file ? file.name : null,
+  });
+
+  try {
+    const r = await fetch('/reports/api/statement/balance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const data = await r.json();
+    if (!r.ok) { showBalBanner(data.error || 'Save failed', 'error'); return; }
+
+    showBalBanner(`✓ Saved — ${institution} ${accountName}: ${fmt(balance)}${stmtDate ? ' as of ' + fmtDate(stmtDate) : ''}`, 'success');
+    // Reset form
+    document.getElementById('b-institution').value = '';
+    document.getElementById('b-account-name').value = '';
+    document.getElementById('b-manual-balance').value = '';
+    document.getElementById('b-manual-date').value = '';
+    document.getElementById('b-file').value = '';
+    document.getElementById('extract-preview').classList.remove('visible');
+    document.getElementById('extract-error').classList.remove('visible');
+    extractedBalance = null; extractedDate = null;
+    loadBalances();
+  } catch(e) {
+    showBalBanner('Save error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save Balance';
+  }
+}
+
+// ── Collapsible reconcile ─────────────────────────────────────────────────────
+let reconOpen = false;
+function toggleRecon() {
+  reconOpen = !reconOpen;
+  document.getElementById('recon-body').classList.toggle('open', reconOpen);
+  document.getElementById('recon-toggle-icon').textContent = reconOpen ? '▼ Hide' : '▶ Show';
+  if (reconOpen) loadHistory();
+}
+
+// ── Transaction reconcile (unchanged logic) ───────────────────────────────────
 let activeTab = 'matched';
 function switchTab(name) {
   activeTab = name;
@@ -249,14 +502,17 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
 }
 
+function showReconBanner(msg, type) {
+  const el = document.getElementById('recon-banner');
+  el.textContent = msg; el.className = 'banner ' + type;
+}
+
 async function upload() {
   const fileInput = document.getElementById('file-input');
-  if (!fileInput.files.length) {
-    showBanner('Please select a CSV file.', 'error'); return;
-  }
+  if (!fileInput.files.length) { showReconBanner('Please select a file.', 'error'); return; }
   const btn = document.getElementById('upload-btn');
   btn.disabled = true; btn.textContent = 'Processing…';
-  clearBanner();
+  document.getElementById('recon-banner').className = 'banner';
 
   const form = new FormData();
   form.append('file', fileInput.files[0]);
@@ -266,55 +522,39 @@ async function upload() {
   try {
     const r = await fetch('/reports/api/reconcile/upload', { method: 'POST', body: form });
     const data = await r.json();
-    if (!r.ok) { showBanner(data.error || 'Upload failed', 'error'); return; }
+    if (!r.ok) { showReconBanner(data.error || 'Upload failed', 'error'); return; }
     renderResults(data);
     loadHistory();
   } catch(e) {
-    showBanner('Upload error: ' + e.message, 'error');
+    showReconBanner('Upload error: ' + e.message, 'error');
   } finally {
     btn.disabled = false; btn.textContent = 'Reconcile';
   }
 }
 
-function showBanner(msg, type) {
-  const el = document.getElementById('banner');
-  el.textContent = msg; el.className = 'banner ' + type;
-}
-function clearBanner() {
-  const el = document.getElementById('banner');
-  el.textContent = ''; el.className = 'banner';
-}
-
 function renderResults(data) {
   const s = data.summary;
   document.getElementById('results').style.display = 'block';
-  document.getElementById('sum-stmt').textContent    = s.statement_count;
-  document.getElementById('sum-matched').textContent = s.matched_count;
-  document.getElementById('sum-only-stmt').textContent = s.only_statement_count;
-  document.getElementById('sum-only-db').textContent   = s.only_db_count;
-  document.getElementById('sum-range').textContent =
-    data.date_range ? fmtDate(data.date_range.start) + ' – ' + fmtDate(data.date_range.end) : '';
-  document.getElementById('sum-rate').textContent = s.match_rate + '% match rate';
+  document.getElementById('sum-stmt').textContent     = s.statement_count;
+  document.getElementById('sum-matched').textContent  = s.matched_count;
+  document.getElementById('sum-only-stmt').textContent= s.only_statement_count;
+  document.getElementById('sum-only-db').textContent  = s.only_db_count;
+  document.getElementById('sum-range').textContent    = data.date_range
+    ? fmtDate(data.date_range.start) + ' – ' + fmtDate(data.date_range.end) : '';
+  document.getElementById('sum-rate').textContent     = s.match_rate + '% match rate';
   document.getElementById('match-bar-label').textContent =
-    `Match rate: ${s.match_rate}%  (${s.matched_count} of ${s.statement_count} statement transactions found in app)`;
-  document.getElementById('match-bar').style.width = s.match_rate + '%';
+    `Match rate: ${s.match_rate}%  (${s.matched_count} of ${s.statement_count} found in app)`;
+  document.getElementById('match-bar').style.width      = s.match_rate + '%';
   document.getElementById('match-bar').style.background =
     s.match_rate >= 90 ? '#28a745' : s.match_rate >= 70 ? '#ffc107' : '#dc3545';
-
-  document.getElementById('tab-count-matched').textContent  = `(${s.matched_count})`;
+  document.getElementById('tab-count-matched').textContent   = `(${s.matched_count})`;
   document.getElementById('tab-count-only-stmt').textContent = `(${s.only_statement_count})`;
   document.getElementById('tab-count-only-db').textContent   = `(${s.only_db_count})`;
-
-  // Matched table
-  document.getElementById('tab-matched').innerHTML = buildMatchedTable(data.matched);
-  // Only in statement
+  document.getElementById('tab-matched').innerHTML        = buildMatchedTable(data.matched);
   document.getElementById('tab-only_statement').innerHTML = buildSimpleTable(data.only_statement, 'stmt');
-  // Only in DB
-  document.getElementById('tab-only_db').innerHTML = buildSimpleTable(data.only_db, 'db');
-
-  if (data.parse_errors && data.parse_errors.length) {
-    showBanner('Parsed with warnings: ' + data.parse_errors.join('; '), 'info');
-  }
+  document.getElementById('tab-only_db').innerHTML        = buildSimpleTable(data.only_db, 'db');
+  if (data.parse_errors && data.parse_errors.length)
+    showReconBanner('Parsed with warnings: ' + data.parse_errors.join('; '), 'info');
   switchTab('matched');
 }
 
@@ -330,14 +570,10 @@ function buildMatchedTable(rows) {
     const diffCell = diff > 0.005
       ? `<td class="right diff-amt">$${diff.toFixed(2)}</td>`
       : `<td class="right" style="color:#aaa">—</td>`;
-    h += `<tr>
-      <td>${fmtDate(s.date)}</td>
-      <td>${escHtml(s.description)}</td>
+    h += `<tr><td>${fmtDate(s.date)}</td><td>${escHtml(s.description)}</td>
       <td class="right">${fmt(s.amount)}</td>
       <td>${escHtml(d.name)}<div class="subdesc">${escHtml(d.account||'')}</div></td>
-      <td class="right">${fmt(d.amount)}</td>
-      ${diffCell}
-    </tr>`;
+      <td class="right">${fmt(d.amount)}</td>${diffCell}</tr>`;
   }
   return h + '</tbody></table>';
 }
@@ -351,18 +587,11 @@ function buildSimpleTable(rows, source) {
   let h = `<table class="data-table"><thead><tr>${headers}</tr></thead><tbody>`;
   for (const t of rows) {
     if (isStmt) {
-      h += `<tr>
-        <td>${fmtDate(t.date)}</td>
-        <td>${escHtml(t.description)}</td>
-        <td class="right">${fmt(t.amount)}</td>
-      </tr>`;
+      h += `<tr><td>${fmtDate(t.date)}</td><td>${escHtml(t.description)}</td><td class="right">${fmt(t.amount)}</td></tr>`;
     } else {
-      h += `<tr>
-        <td>${fmtDate(t.date)}</td>
-        <td>${escHtml(t.name)}</td>
+      h += `<tr><td>${fmtDate(t.date)}</td><td>${escHtml(t.name)}</td>
         <td class="right">${fmt(t.amount)}</td>
-        <td class="subdesc">${escHtml(t.account||'')}</td>
-      </tr>`;
+        <td class="subdesc">${escHtml(t.account||'')}</td></tr>`;
     }
   }
   return h + '</tbody></table>';
@@ -381,7 +610,7 @@ async function loadHistory() {
       h += `<tr>
         <td class="subdesc">${(r.upload_ts||'').slice(0,16)}</td>
         <td>${escHtml(r.filename)}</td>
-        <td><span class="badge badge-match">${escHtml(r.account_type)}</span></td>
+        <td><span class="badge-match">${escHtml(r.account_type)}</span></td>
         <td>${escHtml(r.institution||'—')}</td>
         <td>${fmtDate(r.date_start)} – ${fmtDate(r.date_end)}</td>
         <td class="right">${r.tx_count}</td>
@@ -391,7 +620,8 @@ async function loadHistory() {
   } catch { document.getElementById('history-list').innerHTML = '<div class="empty">Could not load history</div>'; }
 }
 
-loadHistory();
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadBalances();
 </script>
 </body>
 </html>
