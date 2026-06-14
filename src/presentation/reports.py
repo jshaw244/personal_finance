@@ -1867,7 +1867,7 @@ def api_account_balances():
                    i.institution_name
             FROM accounts a
             JOIN items i ON i.item_id = a.item_id
-            WHERE a.type IN ('depository', 'credit', 'investment')
+            WHERE a.type IN ('depository', 'credit', 'investment', 'loan')
             ORDER BY a.type DESC, a.subtype, a.name
         """).fetchall()
         stmt_map = _credit_statement_map(conn)
@@ -5019,6 +5019,52 @@ def api_holdings():
         return jsonify(_build_holdings(conn))
     finally:
         conn.close()
+
+
+@reports_bp.route("/api/holdings/trend")
+@login_required
+def api_holdings_trend():
+    """
+    Portfolio value over time from holdings_snapshots — one point per account
+    per day (latest snapshot that day), plus a combined total series. Series
+    grow each time /investments/holdings is refreshed.
+    """
+    conn = _goals_connect()
+    try:
+        _ensure_holdings_tables(conn)
+        # Latest snapshot per (account, day)
+        rows = conn.execute("""
+            SELECT s.account_id, DATE(s.captured_at) AS d, s.total_value, s.captured_at,
+                   a.name AS acct_name, a.subtype
+            FROM holdings_snapshots s
+            JOIN accounts a ON a.account_id = s.account_id
+            JOIN (
+                SELECT account_id, DATE(captured_at) AS d, MAX(captured_at) AS mx
+                FROM holdings_snapshots GROUP BY account_id, DATE(captured_at)
+            ) last ON last.account_id = s.account_id
+                  AND last.d = DATE(s.captured_at)
+                  AND last.mx = s.captured_at
+            ORDER BY d ASC
+        """).fetchall()
+    finally:
+        conn.close()
+
+    accounts: dict = {}
+    total_by_day: dict = {}
+    for r in rows:
+        aid = r["account_id"]
+        acc = accounts.setdefault(aid, {
+            "account_id": aid, "name": r["acct_name"],
+            "subtype": r["subtype"], "series": [],
+        })
+        acc["series"].append({"date": r["d"], "value": round(float(r["total_value"]), 2)})
+        total_by_day[r["d"]] = round(total_by_day.get(r["d"], 0.0) + float(r["total_value"]), 2)
+
+    total = [{"date": d, "value": v} for d, v in sorted(total_by_day.items())]
+    return jsonify({
+        "accounts": sorted(accounts.values(), key=lambda a: -(a["series"][-1]["value"] if a["series"] else 0)),
+        "total": total,
+    })
 
 
 def _tool_holdings(account="", **_):
