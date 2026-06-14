@@ -1743,6 +1743,89 @@ def monthly():
     return render_template("monthly.html")
 
 
+def _credit_statement_map(conn) -> dict:
+    """
+    account_id -> statement info parsed from Plaid liabilities (credit cards).
+    Populated by the /liabilities fetch into liabilities_raw; empty until then.
+    """
+    out: dict = {}
+    try:
+        rows = conn.execute("SELECT payload_json FROM liabilities_raw").fetchall()
+    except Exception:
+        return out
+    for r in rows:
+        try:
+            payload = json.loads(r["payload_json"])
+        except Exception:
+            continue
+        for cc in (payload.get("liabilities") or {}).get("credit") or []:
+            aid = cc.get("account_id")
+            if not aid:
+                continue
+            out[aid] = {
+                "statement_balance": cc.get("last_statement_balance"),
+                "statement_date":    cc.get("last_statement_issue_date"),
+                "due_date":          cc.get("next_payment_due_date"),
+                "min_payment":       cc.get("minimum_payment_amount"),
+                "is_overdue":        cc.get("is_overdue"),
+            }
+    return out
+
+
+def _schedule_due_map(conn) -> dict:
+    """
+    account_id -> {due_date, due_day, bill_name} for credit cards, derived from
+    the autopay `day` in config/schedules.json. Used as a payment-due-date proxy
+    when Plaid Liabilities data isn't available. Bills are matched to accounts by
+    word overlap between the bill's `plaid_match` and the account's
+    institution / name / mask.
+    """
+    import calendar as _cal
+    out: dict = {}
+    try:
+        with open(PROJECT_ROOT / "config" / "schedules.json", encoding="utf-8") as f:
+            sched = json.load(f)
+    except Exception:
+        return out
+
+    bills = [b for b in sched.get("bills", []) if b.get("day") and b.get("plaid_match")]
+    if not bills:
+        return out
+
+    accts = conn.execute("""
+        SELECT a.account_id, a.name, a.mask, i.institution_name
+        FROM accounts a JOIN items i ON i.item_id = a.item_id
+        WHERE a.type = 'credit'
+    """).fetchall()
+
+    def toks(s):
+        return set(re.findall(r"[a-z]+", (s or "").lower()))
+
+    today = date.today()
+    for a in accts:
+        hay = toks(f"{a['institution_name']} {a['name']} {a['mask']}")
+        best, best_score = None, 0
+        for b in bills:
+            score = len(toks(b.get("plaid_match")) & hay)
+            if score > best_score:
+                best, best_score = b, score
+        if not best or best_score < 1:
+            continue
+        day = int(best["day"])
+        y, m = today.year, today.month
+        if day < today.day:          # already passed this month -> next month
+            m += 1
+            if m > 12:
+                m, y = 1, y + 1
+        day = min(day, _cal.monthrange(y, m)[1])   # clamp (e.g. day 31 in Feb)
+        out[a["account_id"]] = {
+            "due_date":  date(y, m, day).isoformat(),
+            "due_day":   int(best["day"]),
+            "bill_name": best["name"],
+        }
+    return out
+
+
 @reports_bp.route("/api/account_balances")
 @login_required
 def api_account_balances():
@@ -1752,19 +1835,28 @@ def api_account_balances():
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute("""
-            SELECT a.name, a.type, a.subtype,
+            SELECT a.account_id, a.name, a.type, a.subtype,
                    a.current, a.available, a.balance_limit, a.updated_at,
                    i.institution_name
             FROM accounts a
             JOIN items i ON i.item_id = a.item_id
-            WHERE a.type IN ('depository', 'credit')
+            WHERE a.type IN ('depository', 'credit', 'investment')
             ORDER BY a.type DESC, a.subtype, a.name
         """).fetchall()
+        stmt_map = _credit_statement_map(conn)
+        sched_due = _schedule_due_map(conn)
     finally:
         conn.close()
 
     accounts = []
     for r in rows:
+        stmt = stmt_map.get(r["account_id"], {})
+        # Due date priority: Plaid Liabilities > autopay schedule (config).
+        due_date   = stmt.get("due_date")
+        due_source = "statement" if due_date else None
+        if not due_date and r["account_id"] in sched_due:
+            due_date   = sched_due[r["account_id"]]["due_date"]
+            due_source = "autopay"
         accounts.append({
             "name":         r["name"],
             "institution":  r["institution_name"],
@@ -1775,6 +1867,12 @@ def api_account_balances():
             "limit":        float(r["balance_limit"]) if r["balance_limit"] is not None else None,
             "updated_at":   (r["updated_at"] or "")[:10],
             "source":       "plaid",
+            "stmt_balance": stmt.get("statement_balance"),
+            "stmt_date":    stmt.get("statement_date"),
+            "due_date":     due_date,
+            "due_source":   due_source,
+            "min_payment":  stmt.get("min_payment"),
+            "is_overdue":   stmt.get("is_overdue"),
         })
 
     # Append latest manual balances (statement uploads)
@@ -1783,7 +1881,8 @@ def api_account_balances():
         conn2.row_factory = sqlite3.Row
         _ensure_manual_balance_table(conn2)
         manual = conn2.execute("""
-            SELECT id, institution, account_name, account_type, balance, statement_date, uploaded_at
+            SELECT id, institution, account_name, account_type, balance,
+                   statement_date, payment_due_date, uploaded_at
             FROM manual_account_balances
             WHERE id IN (
                 SELECT MAX(id) FROM manual_account_balances GROUP BY institution, account_name
@@ -1792,17 +1891,25 @@ def api_account_balances():
         """).fetchall()
         conn2.close()
         for m in manual:
+            # For a manually entered statement, the recorded balance IS the
+            # statement balance; current Plaid balance is unknown.
             accounts.append({
                 "name":        m["account_name"],
                 "institution": m["institution"],
                 "type":        m["account_type"],
                 "subtype":     m["account_type"],
-                "current":     float(m["balance"]),
+                "current":     None,
                 "available":   None,
                 "limit":       None,
                 "updated_at":  (m["statement_date"] or m["uploaded_at"] or "")[:10],
                 "source":      "manual",
                 "manual_id":   m["id"],
+                "stmt_balance": float(m["balance"]) if m["balance"] is not None else None,
+                "stmt_date":    m["statement_date"],
+                "due_date":     m["payment_due_date"],
+                "due_source":   "manual" if m["payment_due_date"] else None,
+                "min_payment":  None,
+                "is_overdue":   None,
             })
     except Exception:
         pass
@@ -2919,6 +3026,10 @@ def _ensure_manual_balance_table(conn) -> None:
             uploaded_at    TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Migration: add payment_due_date to pre-existing tables.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(manual_account_balances)")}
+    if "payment_due_date" not in cols:
+        conn.execute("ALTER TABLE manual_account_balances ADD COLUMN payment_due_date TEXT")
     conn.commit()
 
 
@@ -2949,6 +3060,7 @@ def api_save_statement_balance():
         account_type  = (body.get("account_type") or "credit").strip().lower()
         balance       = body.get("balance")
         stmt_date     = (body.get("statement_date") or "").strip() or None
+        due_date      = (body.get("payment_due_date") or "").strip() or None
         source_file   = (body.get("source_file") or "").strip() or None
     else:
         institution   = (request.form.get("institution") or "").strip()
@@ -2956,6 +3068,7 @@ def api_save_statement_balance():
         account_type  = (request.form.get("account_type") or "credit").strip().lower()
         raw_balance   = request.form.get("balance")
         stmt_date     = (request.form.get("statement_date") or "").strip() or None
+        due_date      = (request.form.get("payment_due_date") or "").strip() or None
         source_file   = None
         balance       = None
 
@@ -2991,15 +3104,15 @@ def api_save_statement_balance():
         _ensure_manual_balance_table(conn)
         conn.execute(
             "INSERT INTO manual_account_balances "
-            "(institution, account_name, account_type, balance, statement_date, source_file) "
-            "VALUES (?,?,?,?,?,?)",
-            (institution, account_name, account_type, float(balance), stmt_date, source_file),
+            "(institution, account_name, account_type, balance, statement_date, payment_due_date, source_file) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (institution, account_name, account_type, float(balance), stmt_date, due_date, source_file),
         )
         conn.commit()
     finally:
         conn.close()
 
-    return jsonify({"ok": True, "balance": balance, "statement_date": stmt_date})
+    return jsonify({"ok": True, "balance": balance, "statement_date": stmt_date, "payment_due_date": due_date})
 
 
 @reports_bp.route("/api/statement/balances")
@@ -3013,7 +3126,7 @@ def api_list_statement_balances():
         _ensure_manual_balance_table(conn)
         rows = conn.execute("""
             SELECT id, institution, account_name, account_type,
-                   balance, statement_date, source_file, uploaded_at
+                   balance, statement_date, payment_due_date, source_file, uploaded_at
             FROM manual_account_balances
             WHERE id IN (
                 SELECT MAX(id) FROM manual_account_balances
@@ -3091,7 +3204,8 @@ def _reconcile(stmt_txs: list, db_txs: list) -> dict:
     }
 
 
-@reports_bp.route("/reconcile")
+@reports_bp.route("/accounts")
+@reports_bp.route("/reconcile")   # legacy alias
 @login_required
 def reconcile_page():
     return render_template("reconcile.html")

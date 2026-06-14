@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Statements</title>
+  <title>Accounts</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
@@ -159,7 +159,7 @@
 <body>
 
 <div class="topbar">
-  <h1>Statements</h1>
+  <h1>Accounts</h1>
   <a href="/reports">← Reports</a>
   <a href="/reports/budget">Budget</a>
   <a href="/reports/goals">Savings Goals</a>
@@ -171,9 +171,19 @@
 
   <!-- ── Section 1: Current Account Balances ───────────────────── -->
   <div class="card">
-    <h2>Account Balances</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.5rem">
+      <h2 style="margin:0">Account Balances</h2>
+      <button class="btn btn-ghost" id="refresh-stmt-btn" onclick="refreshStatementData()"
+              title="Fetch latest statement balances &amp; due dates from your banks (credit cards)">
+        ↻ Refresh statement data
+      </button>
+    </div>
     <div id="bal-banner" class="banner"></div>
     <div id="bal-table-wrap"><div class="loading">Loading…</div></div>
+    <p class="note">
+      Statement balance &amp; payment due come from your banks for credit cards (click
+      <b>Refresh statement data</b>), or from a statement you enter below for accounts that aren't linked.
+    </p>
   </div>
 
   <!-- ── Section 2: Update Balance from Statement ──────────────── -->
@@ -232,73 +242,15 @@
         <label>Statement Date (manual override)</label>
         <input type="text" id="b-manual-date" placeholder="YYYY-MM-DD" style="min-width:130px">
       </div>
+      <div class="form-group">
+        <label>Payment Due Date (optional)</label>
+        <input type="text" id="b-manual-due" placeholder="YYYY-MM-DD" style="min-width:130px">
+      </div>
     </div>
     <p class="note">
       Upload a Synchrony or Schwab PDF — balance is extracted automatically.
       Use the manual fields to correct or enter a balance without a file.
     </p>
-  </div>
-
-  <!-- ── Section 3: Transaction Reconciliation (collapsible) ───── -->
-  <div class="collapsible-header" onclick="toggleRecon()">
-    <h2>Transaction Reconciliation <span style="font-weight:400;color:#888;font-size:.85rem">(CSV comparison against Plaid)</span></h2>
-    <span class="toggle-icon" id="recon-toggle-icon">▶ Show</span>
-  </div>
-  <div class="collapsible-body" id="recon-body">
-    <div class="collapsible-inner">
-      <div class="form-row" style="margin-bottom:.75rem">
-        <div class="form-group">
-          <label>Account Type</label>
-          <select id="account-type">
-            <option value="checking">Checking</option>
-            <option value="savings">Savings</option>
-            <option value="credit">Credit Card</option>
-            <option value="mortgage">Mortgage</option>
-            <option value="retirement">Retirement / Brokerage</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Institution (optional)</label>
-          <input type="text" id="institution" placeholder="e.g. Fifth Third, Chase…">
-        </div>
-        <div class="file-wrap">
-          <label>Statement File (CSV or PDF)</label>
-          <input type="file" id="file-input" accept=".csv,.tsv,.txt,.pdf">
-        </div>
-        <button class="btn btn-primary" id="upload-btn" onclick="upload()">Reconcile</button>
-      </div>
-      <p class="note" style="margin-top:0">
-        CSV files need Date, Description, and Amount columns.
-        Checking/savings: export from bank website. Credit cards: export from card portal.
-      </p>
-
-      <div class="banner" id="recon-banner"></div>
-      <div id="results" style="display:none">
-        <div class="summary-bar">
-          <div class="seg seg-total"><label>Statement Transactions</label><div class="big" id="sum-stmt">—</div><div class="sub" id="sum-range">—</div></div>
-          <div class="seg seg-matched"><label>Matched in App</label><div class="big" id="sum-matched">—</div><div class="sub" id="sum-rate">—</div></div>
-          <div class="seg seg-stmt"><label>Only in Statement</label><div class="big" id="sum-only-stmt">—</div><div class="sub">not found in app</div></div>
-          <div class="seg seg-db"><label>Only in App</label><div class="big" id="sum-only-db">—</div><div class="sub">not in statement</div></div>
-        </div>
-        <div class="match-bar-wrap">
-          <label id="match-bar-label">Match rate</label>
-          <div class="match-bar-bg"><div class="match-bar-fill" id="match-bar" style="width:0%"></div></div>
-        </div>
-        <div class="tabs">
-          <button class="tab-btn active" onclick="switchTab('matched')">Matched <span id="tab-count-matched"></span></button>
-          <button class="tab-btn" onclick="switchTab('only_statement')">Only in Statement <span id="tab-count-only-stmt"></span></button>
-          <button class="tab-btn" onclick="switchTab('only_db')">Only in App <span id="tab-count-only-db"></span></button>
-        </div>
-        <div id="tab-matched" class="results-section active"></div>
-        <div id="tab-only_statement" class="results-section"></div>
-        <div id="tab-only_db" class="results-section"></div>
-      </div>
-
-      <div class="history-panel" style="background:#f8f9fa;border-radius:8px;padding:1rem 1.25rem;margin-top:1.5rem">
-        <h3 style="margin:0 0 .75rem;font-size:.92rem;color:#444">Recent CSV Uploads</h3>
-        <div id="history-list"><div class="loading">Loading…</div></div>
-      </div>
-    </div>
   </div>
 
 </div>
@@ -322,42 +274,44 @@ function showBalBanner(msg, type) {
 }
 
 // ── Balance table ─────────────────────────────────────────────────────────────
+// /api/account_balances already merges Plaid + manual statement entries and
+// carries statement balance / date / due date on each row.
+const TYPE_ORDER = { depository: 0, credit: 1, investment: 2 };
+
 async function loadBalances() {
   try {
-    const [plaid, manual] = await Promise.all([
-      fetch('/reports/api/account_balances').then(r => r.json()),
-      fetch('/reports/api/statement/balances').then(r => r.json()),
-    ]);
-    renderBalTable(plaid, manual);
+    const rows = await fetch('/reports/api/account_balances').then(r => r.json());
+    renderBalTable(rows);
   } catch(e) {
     document.getElementById('bal-table-wrap').innerHTML =
       '<div class="empty">Could not load balances</div>';
   }
 }
 
-function renderBalTable(plaid, manual) {
-  const all = [
-    ...plaid.map(a => ({ ...a, source: 'plaid' })),
-    ...manual.map(m => ({
-      name: m.account_name,
-      institution: m.institution,
-      type: m.account_type,
-      current: m.balance,
-      updated_at: (m.statement_date || m.uploaded_at || '').slice(0,10),
-      source: 'manual',
-      manual_id: m.id,
-    })),
-  ];
+function prettyType(a) {
+  const t = (a.subtype || a.type || '').toString();
+  return t.replace(/\b\w/g, c => c.toUpperCase());
+}
 
-  if (!all.length) {
+function renderBalTable(all) {
+  if (!all || !all.length) {
     document.getElementById('bal-table-wrap').innerHTML =
-      '<div class="empty">No accounts yet. Upload a statement above to add one.</div>';
+      '<div class="empty">No accounts yet.</div>';
     return;
   }
 
+  // Group order: banking, credit, investments
+  all.sort((a, b) =>
+    (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9) ||
+    String(a.institution||'').localeCompare(String(b.institution||'')));
+
   let h = `<table class="bal-table"><thead><tr>
     <th>Institution</th><th>Account</th><th>Type</th>
-    <th class="right">Balance</th><th>As Of</th><th>Source</th><th></th>
+    <th class="right">Current Balance</th>
+    <th class="right">Statement Balance</th>
+    <th>Statement Date</th>
+    <th>Payment Due</th>
+    <th>Source</th><th></th>
   </tr></thead><tbody>`;
 
   for (const a of all) {
@@ -367,12 +321,25 @@ function renderBalTable(plaid, manual) {
     const delBtn = a.source === 'manual'
       ? `<button class="del-btn" onclick="deleteBalance(${a.manual_id},this)" title="Remove">✕</button>`
       : '';
+
+    // Payment due cell: highlight overdue; note when it's an autopay-schedule estimate
+    let dueCell = a.due_date ? fmtDate(a.due_date) : '—';
+    if (a.due_date && a.is_overdue) {
+      dueCell = `<span style="color:#c33;font-weight:700">${fmtDate(a.due_date)} · overdue</span>`;
+    } else if (a.due_date && a.due_source === 'autopay') {
+      dueCell = `${fmtDate(a.due_date)} <span style="font-size:.7rem;color:#999">· autopay</span>`;
+    }
+    const minPay = (a.min_payment != null)
+      ? `<div class="subdesc" style="font-size:.72rem;color:#999">min ${fmt(a.min_payment)}</div>` : '';
+
     h += `<tr>
       <td>${escHtml(a.institution || '—')}</td>
       <td>${escHtml(a.name)}</td>
-      <td>${escHtml(a.type || a.subtype || '—')}</td>
-      <td class="right">${fmt(a.current)}</td>
-      <td style="font-size:.82rem;color:#666">${fmtDate(a.updated_at) || '—'}</td>
+      <td>${escHtml(prettyType(a))}</td>
+      <td class="right">${a.current != null ? fmt(a.current) : '—'}</td>
+      <td class="right">${a.stmt_balance != null ? fmt(a.stmt_balance) : '—'}</td>
+      <td style="font-size:.82rem;color:#666">${a.stmt_date ? fmtDate(a.stmt_date) : '—'}</td>
+      <td style="font-size:.82rem;color:#666">${dueCell}${minPay}</td>
       <td>${srcBadge}</td>
       <td>${delBtn}</td>
     </tr>`;
@@ -386,6 +353,26 @@ async function deleteBalance(id, btn) {
   btn.disabled = true;
   await fetch(`/reports/api/statement/balance/${id}`, { method: 'DELETE' });
   loadBalances();
+}
+
+// Pull latest statement balances + due dates from banks (Plaid Liabilities).
+async function refreshStatementData() {
+  const btn = document.getElementById('refresh-stmt-btn');
+  btn.disabled = true; btn.textContent = '↻ Refreshing…';
+  try {
+    const r = await fetch('/liabilities');
+    const j = await r.json();
+    if (!r.ok) { showBalBanner(j.error || 'Refresh failed', 'error'); }
+    else {
+      const n = j.updated != null ? j.updated : '?';
+      showBalBanner(`✓ Statement data refreshed for ${n} card account(s).`, 'success');
+      await loadBalances();
+    }
+  } catch(e) {
+    showBalBanner('Refresh error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '↻ Refresh statement data';
+  }
 }
 
 // ── PDF extraction ────────────────────────────────────────────────────────────
@@ -433,6 +420,7 @@ async function saveBalance() {
   const accountType = document.getElementById('b-account-type').value;
   const manualBal   = document.getElementById('b-manual-balance').value.trim();
   const manualDate  = document.getElementById('b-manual-date').value.trim();
+  const manualDue   = document.getElementById('b-manual-due').value.trim();
   const file        = document.getElementById('b-file').files[0];
 
   if (!institution) { showBalBanner('Institution is required.', 'error'); return; }
@@ -445,13 +433,14 @@ async function saveBalance() {
   }
 
   const stmtDate = manualDate || extractedDate || null;
+  const dueDate  = manualDue || null;
   const btn = document.getElementById('b-save-btn');
   btn.disabled = true; btn.textContent = 'Saving…';
 
   // If file available and we already extracted, just POST JSON (avoid re-uploading)
   const body = JSON.stringify({
     institution, account_name: accountName, account_type: accountType,
-    balance, statement_date: stmtDate,
+    balance, statement_date: stmtDate, payment_due_date: dueDate,
     source_file: file ? file.name : null,
   });
 
@@ -470,6 +459,7 @@ async function saveBalance() {
     document.getElementById('b-account-name').value = '';
     document.getElementById('b-manual-balance').value = '';
     document.getElementById('b-manual-date').value = '';
+    document.getElementById('b-manual-due').value = '';
     document.getElementById('b-file').value = '';
     document.getElementById('extract-preview').classList.remove('visible');
     document.getElementById('extract-error').classList.remove('visible');
@@ -480,144 +470,6 @@ async function saveBalance() {
   } finally {
     btn.disabled = false; btn.textContent = 'Save Balance';
   }
-}
-
-// ── Collapsible reconcile ─────────────────────────────────────────────────────
-let reconOpen = false;
-function toggleRecon() {
-  reconOpen = !reconOpen;
-  document.getElementById('recon-body').classList.toggle('open', reconOpen);
-  document.getElementById('recon-toggle-icon').textContent = reconOpen ? '▼ Hide' : '▶ Show';
-  if (reconOpen) loadHistory();
-}
-
-// ── Transaction reconcile (unchanged logic) ───────────────────────────────────
-let activeTab = 'matched';
-function switchTab(name) {
-  activeTab = name;
-  document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    b.classList.toggle('active', ['matched','only_statement','only_db'][i] === name);
-  });
-  document.querySelectorAll('.results-section').forEach(s => s.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-}
-
-function showReconBanner(msg, type) {
-  const el = document.getElementById('recon-banner');
-  el.textContent = msg; el.className = 'banner ' + type;
-}
-
-async function upload() {
-  const fileInput = document.getElementById('file-input');
-  if (!fileInput.files.length) { showReconBanner('Please select a file.', 'error'); return; }
-  const btn = document.getElementById('upload-btn');
-  btn.disabled = true; btn.textContent = 'Processing…';
-  document.getElementById('recon-banner').className = 'banner';
-
-  const form = new FormData();
-  form.append('file', fileInput.files[0]);
-  form.append('account_type', document.getElementById('account-type').value);
-  form.append('institution', document.getElementById('institution').value);
-
-  try {
-    const r = await fetch('/reports/api/reconcile/upload', { method: 'POST', body: form });
-    const data = await r.json();
-    if (!r.ok) { showReconBanner(data.error || 'Upload failed', 'error'); return; }
-    renderResults(data);
-    loadHistory();
-  } catch(e) {
-    showReconBanner('Upload error: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false; btn.textContent = 'Reconcile';
-  }
-}
-
-function renderResults(data) {
-  const s = data.summary;
-  document.getElementById('results').style.display = 'block';
-  document.getElementById('sum-stmt').textContent     = s.statement_count;
-  document.getElementById('sum-matched').textContent  = s.matched_count;
-  document.getElementById('sum-only-stmt').textContent= s.only_statement_count;
-  document.getElementById('sum-only-db').textContent  = s.only_db_count;
-  document.getElementById('sum-range').textContent    = data.date_range
-    ? fmtDate(data.date_range.start) + ' – ' + fmtDate(data.date_range.end) : '';
-  document.getElementById('sum-rate').textContent     = s.match_rate + '% match rate';
-  document.getElementById('match-bar-label').textContent =
-    `Match rate: ${s.match_rate}%  (${s.matched_count} of ${s.statement_count} found in app)`;
-  document.getElementById('match-bar').style.width      = s.match_rate + '%';
-  document.getElementById('match-bar').style.background =
-    s.match_rate >= 90 ? '#28a745' : s.match_rate >= 70 ? '#ffc107' : '#dc3545';
-  document.getElementById('tab-count-matched').textContent   = `(${s.matched_count})`;
-  document.getElementById('tab-count-only-stmt').textContent = `(${s.only_statement_count})`;
-  document.getElementById('tab-count-only-db').textContent   = `(${s.only_db_count})`;
-  document.getElementById('tab-matched').innerHTML        = buildMatchedTable(data.matched);
-  document.getElementById('tab-only_statement').innerHTML = buildSimpleTable(data.only_statement, 'stmt');
-  document.getElementById('tab-only_db').innerHTML        = buildSimpleTable(data.only_db, 'db');
-  if (data.parse_errors && data.parse_errors.length)
-    showReconBanner('Parsed with warnings: ' + data.parse_errors.join('; '), 'info');
-  switchTab('matched');
-}
-
-function buildMatchedTable(rows) {
-  if (!rows.length) return '<div class="empty">No matched transactions</div>';
-  let h = `<table class="data-table"><thead><tr>
-    <th>Date</th><th>Statement Description</th><th class="right">Stmt Amt</th>
-    <th>App Name</th><th class="right">App Amt</th><th class="right">Diff</th>
-    </tr></thead><tbody>`;
-  for (const m of rows) {
-    const s = m.statement, d = m.db;
-    const diff = Math.abs(Math.abs(s.amount) - Math.abs(d.amount));
-    const diffCell = diff > 0.005
-      ? `<td class="right diff-amt">$${diff.toFixed(2)}</td>`
-      : `<td class="right" style="color:#aaa">—</td>`;
-    h += `<tr><td>${fmtDate(s.date)}</td><td>${escHtml(s.description)}</td>
-      <td class="right">${fmt(s.amount)}</td>
-      <td>${escHtml(d.name)}<div class="subdesc">${escHtml(d.account||'')}</div></td>
-      <td class="right">${fmt(d.amount)}</td>${diffCell}</tr>`;
-  }
-  return h + '</tbody></table>';
-}
-
-function buildSimpleTable(rows, source) {
-  if (!rows.length) return '<div class="empty">No transactions in this category</div>';
-  const isStmt = source === 'stmt';
-  const headers = isStmt
-    ? '<th>Date</th><th>Description</th><th class="right">Amount</th>'
-    : '<th>Date</th><th>App Name</th><th class="right">Amount</th><th>Account</th>';
-  let h = `<table class="data-table"><thead><tr>${headers}</tr></thead><tbody>`;
-  for (const t of rows) {
-    if (isStmt) {
-      h += `<tr><td>${fmtDate(t.date)}</td><td>${escHtml(t.description)}</td><td class="right">${fmt(t.amount)}</td></tr>`;
-    } else {
-      h += `<tr><td>${fmtDate(t.date)}</td><td>${escHtml(t.name)}</td>
-        <td class="right">${fmt(t.amount)}</td>
-        <td class="subdesc">${escHtml(t.account||'')}</td></tr>`;
-    }
-  }
-  return h + '</tbody></table>';
-}
-
-async function loadHistory() {
-  try {
-    const data = await fetch('/reports/api/reconcile/history').then(r => r.json());
-    const el = document.getElementById('history-list');
-    if (!data.length) { el.innerHTML = '<div class="empty">No uploads yet</div>'; return; }
-    let h = `<table class="data-table"><thead><tr>
-      <th>Uploaded</th><th>File</th><th>Type</th><th>Institution</th>
-      <th>Date Range</th><th class="right">Rows</th>
-    </tr></thead><tbody>`;
-    for (const r of data) {
-      h += `<tr>
-        <td class="subdesc">${(r.upload_ts||'').slice(0,16)}</td>
-        <td>${escHtml(r.filename)}</td>
-        <td><span class="badge-match">${escHtml(r.account_type)}</span></td>
-        <td>${escHtml(r.institution||'—')}</td>
-        <td>${fmtDate(r.date_start)} – ${fmtDate(r.date_end)}</td>
-        <td class="right">${r.tx_count}</td>
-      </tr>`;
-    }
-    el.innerHTML = h + '</tbody></table>';
-  } catch { document.getElementById('history-list').innerHTML = '<div class="empty">Could not load history</div>'; }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
