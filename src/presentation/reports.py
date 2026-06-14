@@ -4817,12 +4817,65 @@ def _tool_top_merchants(range="12m", account="", limit=10, **_):
                            "count": int(r["count"])} for k, r in g.iterrows()]}
 
 
+def _tool_budget_status(month="", **_):
+    conn = _goals_connect()
+    try:
+        _ensure_budget_tables(conn)
+        month = (month or _month_key(date.today()))[:7]
+        actuals, income_actual = _budget_actuals_by_category(month_key=month)
+        saved = {r["category"]: r for r in
+                 conn.execute("SELECT category, tier, target_amount FROM budget_plan").fetchall()}
+        expected_income = float(_budget_settings_get(conn, "expected_income", 0) or 0)
+        tiers = {t: {"target": 0.0, "actual": 0.0} for t in _BUDGET_TIERS}
+        overspend = []
+        for cat in (set(saved) | set(actuals)):
+            if not cat or cat.lower() in _BUDGET_SKIP_CATS:
+                continue
+            s      = saved.get(cat)
+            tier   = s["tier"] if s else _budget_tier_for(cat)
+            target = float(s["target_amount"]) if s else 0.0
+            act    = round(actuals.get(cat, 0.0), 2)
+            tiers.setdefault(tier, {"target": 0.0, "actual": 0.0})
+            tiers[tier]["target"] += target
+            tiers[tier]["actual"] += act
+            if target > 0 and act > target:
+                overspend.append({"category": cat, "target": target, "actual": act,
+                                  "over": round(act - target, 2)})
+        for t in tiers:
+            tiers[t] = {k: round(v, 2) for k, v in tiers[t].items()}
+        overspend.sort(key=lambda x: -x["over"])
+        return {"month": month,
+                "income": {"expected": round(expected_income, 2), "actual": round(income_actual, 2)},
+                "tiers": tiers, "overspending": overspend[:6],
+                "note": "target 0 = no budget set for that category yet"}
+    finally:
+        conn.close()
+
+
+def _tool_savings_goal(**_):
+    conn = _goals_connect()
+    try:
+        _ensure_savings_goals_table(conn)
+        g = conn.execute("SELECT * FROM savings_goals WHERE status='active' "
+                         "ORDER BY id DESC LIMIT 1").fetchone()
+        if not g:
+            return {"note": "No active savings goal. The user can set one on the Savings Goals page."}
+        st = _compute_goal_stats(g, _total_savings_now(conn))
+        keys = ("name", "target_amount", "progress", "pct", "projected_eoy",
+                "need_monthly", "on_track", "end_date", "days_elapsed", "days_total")
+        return {k: st[k] for k in keys}
+    finally:
+        conn.close()
+
+
 _AI_TOOL_FNS = {
     "list_accounts":          _tool_list_accounts,
     "get_flow_summary":       _tool_flow_summary,
     "get_account_cashflow":   _tool_account_cashflow,
     "get_spending_by_category": _tool_spending_by_category,
     "get_top_merchants":      _tool_top_merchants,
+    "get_budget_status":      _tool_budget_status,
+    "get_savings_goal":       _tool_savings_goal,
 }
 
 _AI_TOOLS = [
@@ -4861,6 +4914,20 @@ _AI_TOOLS = [
             "limit":   {"type": "integer", "description": "How many merchants (default 10)"},
         }},
     }},
+    {"type": "function", "function": {
+        "name": "get_budget_status",
+        "description": "Budget vs actual for a month: Need/Want/Savings tier targets vs actual "
+                       "spending, expected vs actual income, and the biggest category overspends.",
+        "parameters": {"type": "object", "properties": {
+            "month": {"type": "string", "description": "Month as YYYY-MM; omit for current month"},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "get_savings_goal",
+        "description": "Active savings-goal projection: progress, target, % done, projected end-of-year "
+                       "amount, required monthly contribution, and on-track status.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
 ]
 
 
@@ -4895,11 +4962,13 @@ def api_ai_status():
 _AI_TOOLS_HINT = (
     "\n\nYou also have TOOLS to fetch specifics beyond the summary: list_accounts, "
     "get_flow_summary, get_account_cashflow(account, month), "
-    "get_spending_by_category(range, account?), get_top_merchants(range, account?). "
-    "Call a tool whenever the question needs a specific month, account, category, or "
-    "merchant detail not in the summary. Refer to accounts by name (e.g. 'Amex', "
-    "'Fifth Third checking'). After getting tool results, answer concisely with the "
-    "real figures. Never invent numbers — use a tool or say it's not available."
+    "get_spending_by_category(range, account?), get_top_merchants(range, account?), "
+    "get_budget_status(month?), get_savings_goal(). "
+    "Call a tool whenever the question needs a specific month, account, category, "
+    "merchant, budget, or goal detail not in the summary. Refer to accounts by name "
+    "(e.g. 'Amex', 'Fifth Third checking'). After getting tool results, answer "
+    "concisely with the real figures. Never invent numbers — use a tool or say it's "
+    "not available."
 )
 
 
