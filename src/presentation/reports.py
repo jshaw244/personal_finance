@@ -3356,6 +3356,7 @@ def api_transactions():
     q        = (request.args.get("q") or "").strip().lower()
     cat      = (request.args.get("category") or "").strip()
     acct_sub = (request.args.get("account_subtype") or "").strip()
+    acct_id  = (request.args.get("account_id") or "").strip()
     month    = (request.args.get("month") or "").strip()
     start    = (request.args.get("start") or "").strip()
     end      = (request.args.get("end") or "").strip()
@@ -3374,6 +3375,8 @@ def api_transactions():
         filters.append("tc.user_category = ?"); params.append(cat)
     if acct_sub:
         filters.append("a.subtype = ?"); params.append(acct_sub)
+    if acct_id:
+        filters.append("a.account_id = ?"); params.append(acct_id)
     if month:
         filters.append("t.date LIKE ?"); params.append(f"{month}%")
     elif start and end:
@@ -3444,6 +3447,202 @@ def api_transaction_categories():
     db_cats = [r["user_category"] for r in rows]
     merged  = sorted(set(_COMMON_CATEGORIES) | set(db_cats))
     return jsonify(merged)
+
+
+@reports_bp.route("/api/transactions/accounts")
+@login_required
+def api_transaction_accounts():
+    """Accounts that have transactions, for the specific-account filter dropdown."""
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT a.account_id, a.name, a.subtype, a.type, a.mask,
+                   i.institution_name,
+                   COUNT(t.transaction_id) AS n
+            FROM accounts a
+            JOIN items i ON i.item_id = a.item_id
+            JOIN transactions t ON t.account_id = a.account_id
+            GROUP BY a.account_id
+            ORDER BY i.institution_name, a.type, a.name
+        """).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        mask = f" ••{r['mask']}" if r["mask"] else ""
+        out.append({
+            "account_id": r["account_id"],
+            "label":      f"{r['institution_name']} · {r['name']}{mask}",
+            "subtype":    r["subtype"],
+            "count":      r["n"],
+        })
+    return jsonify(out)
+
+
+# ===================================================================
+# Flow-type model (Stage 2 — read-only report; nothing else consumes it yet)
+# -------------------------------------------------------------------
+# A single per-transaction "flow type" so true expense / savings /
+# investment / income can be reported per-account AND overall, with
+# internal money movement netted out and refunds netted against expense.
+# ===================================================================
+
+_FLOW_TYPES = ("expense", "income", "refund", "savings", "investment", "internal_transfer")
+
+# Authoritative recurring external-transfer destinations leaving a spending
+# account (Plaid mislabels several of these as credit-card payments). Matched on
+# the transaction name; specific enough not to catch the matching card payments
+# ("Capital One Transfer" vs "Capital One CrCardPmt", "…Transfer to SV" vs
+# "…to CC", "Synchrony Bank Transfer" vs "AMZ_STORECRD_PMT").
+# Will be persisted as classification_rules in Stage 3.
+_INVEST_DEST  = ("schwab brokerage moneylink", "edward jones")
+_SAVINGS_DEST = ("synchrony bank transfer", "online transfer to sv",
+                 "capital one transfer", "schwab bank transfer", "american airlines")
+
+
+def _external_transfer_bucket(name: str):
+    n = (name or "").lower()
+    if any(p in n for p in _INVEST_DEST):
+        return "investment"
+    if any(p in n for p in _SAVINGS_DEST):
+        return "savings"
+    return None
+
+
+def _derive_flow_type(acct_type, subtype, amount, user_category, exclude_reason, pfc_detailed, name="") -> str:
+    """Map one transaction to a single flow type. Sign convention (Plaid):
+    positive = money OUT of the account, negative = money IN.
+
+    Principles:
+      - Savings/investment is counted ONCE, on the leg leaving a spending
+        account (checking/credit). That's the only place an unlinked
+        destination (e.g. Synchrony) is even visible.
+      - Activity ON a savings/brokerage account is therefore internal movement
+        (already counted at the source), except interest/dividends = income.
+      - The user's explicit category beats Plaid's guessed exclude_reason
+        (Plaid mislabels Synchrony transfers as pfc_credit_card_payment)."""
+    cat    = (user_category or "").lower()
+    reason = (exclude_reason or "").lower()
+    pfcd   = (pfc_detailed or "").upper()
+    at     = (acct_type or "").lower()
+    sub    = (subtype or "").lower()
+    amt    = float(amount or 0)
+
+    # Money moving through a savings / brokerage / retirement account is the
+    # receiving (or internal) leg — net it out. Keep interest/dividends as income.
+    if sub == "savings" or at == "investment":
+        return "income" if cat == "income" else "internal_transfer"
+
+    # Known recurring external transfers OUT of checking → savings/investment.
+    # Authoritative: overrides Plaid's mislabeled category/reason. Depository
+    # only, so it can never catch a same-named credit-card purchase.
+    if at == "depository" and amt > 0:
+        b = _external_transfer_bucket(name)
+        if b:
+            return b
+
+    # --- spending accounts (checking / credit): explicit category wins ---
+    if cat == "savings":
+        return "savings"
+    if cat == "investment":
+        return "investment"
+    if cat == "income":
+        return "refund" if at == "credit" else "income"
+    if cat in ("transfer in", "transfer out", "loan payments"):
+        return "internal_transfer"
+
+    # Credit-card mechanics
+    if reason == "pfc_credit_card_payment" or "CREDIT_CARD_PAYMENT" in pfcd:
+        return "internal_transfer"
+    if at == "credit" and amt < 0:
+        return "refund"
+    if at == "credit" and amt > 0 and cat in ("savings", "investment"):
+        return "expense"
+
+    # Reason-based fallbacks when there is no explicit category
+    if reason == "investment_transfer":
+        return "investment"
+    if reason == "savings_transfer_out":
+        return "savings"
+    if reason in ("transfer_in_excluded", "pfc_transfer_with_transfer_text",
+                  "text_looks_like_payment_or_transfer"):
+        return "internal_transfer"
+    if "REFUND" in pfcd or "RETURN" in pfcd:
+        return "refund"
+    if at == "depository" and amt < 0:
+        return "income"
+    return "expense"
+
+
+@reports_bp.route("/api/flow_type/report")
+@login_required
+def api_flow_type_report():
+    """Read-only verification report: flow-type breakdown overall + per account."""
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT t.amount, t.name AS tx_name,
+                   a.account_id, a.name AS acct_name, a.type AS acct_type,
+                   a.subtype, i.institution_name,
+                   tc.user_category, tc.exclude_reason,
+                   tm.payload_json
+            FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+            JOIN items i ON i.item_id = a.item_id
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            LEFT JOIN transaction_meta tm ON tm.transaction_id = t.transaction_id
+            WHERE IFNULL(t.pending, 0) = 0
+        """).fetchall()
+    finally:
+        conn.close()
+
+    def _blank():
+        return {ft: 0.0 for ft in _FLOW_TYPES}
+
+    overall = _blank()
+    per_acct: dict = {}
+    for r in rows:
+        pfc_detailed = ""
+        if r["payload_json"]:
+            try:
+                pfc = (json.loads(r["payload_json"]).get("personal_finance_category") or {})
+                pfc_detailed = pfc.get("detailed") or ""
+            except Exception:
+                pass
+        ft = _derive_flow_type(r["acct_type"], r["subtype"], r["amount"],
+                               r["user_category"], r["exclude_reason"], pfc_detailed,
+                               r["tx_name"])
+        val = abs(float(r["amount"] or 0))
+        overall[ft] += val
+        key = r["account_id"]
+        if key not in per_acct:
+            per_acct[key] = {
+                "account": f"{r['institution_name']} · {r['acct_name']}",
+                "type": r["acct_type"], "subtype": r["subtype"], **_blank(),
+            }
+        per_acct[key][ft] += val
+
+    def _finalize(d):
+        d = {**d}
+        d["expense_net"] = round(d["expense"] - d["refund"], 2)
+        for ft in _FLOW_TYPES:
+            d[ft] = round(d[ft], 2)
+        return d
+
+    accounts = sorted(
+        (_finalize(v) for v in per_acct.values()),
+        key=lambda x: (-(x["expense_net"] + x["savings"] + x["investment"])),
+    )
+    return jsonify({
+        "overall": _finalize(overall),
+        "accounts": accounts,
+        "note": "Read-only. expense_net = expense − refunds. internal_transfer is "
+                "money moved between your own accounts (netted out of spend).",
+    })
 
 
 @reports_bp.route("/api/transactions/classify", methods=["POST"])

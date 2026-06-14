@@ -165,10 +165,13 @@
     <option value="__none__">Uncategorized</option>
   </select>
   <select id="f-account" onchange="loadPage(1)">
-    <option value="">All Accounts</option>
+    <option value="">All Types</option>
     <option value="checking">Checking</option>
     <option value="savings">Savings</option>
     <option value="credit card">Credit Card</option>
+  </select>
+  <select id="f-account-id" onchange="loadPage(1)" title="Filter by a specific account">
+    <option value="">All Accounts</option>
   </select>
   <select id="f-month" onchange="loadPage(1)">
     <option value="">All Dates</option>
@@ -289,6 +292,16 @@ async function loadCategories() {
   });
 }
 
+async function loadAccountList() {
+  const accts = await fetch('/reports/api/transactions/accounts').then(r => r.json()).catch(() => []);
+  const sel = document.getElementById('f-account-id');
+  accts.forEach(a => {
+    const o = document.createElement('option');
+    o.value = a.account_id; o.textContent = a.label;
+    sel.appendChild(o);
+  });
+}
+
 function populateMonthSelect() {
   const sel = document.getElementById('f-month');
   const now = new Date();
@@ -306,6 +319,7 @@ function clearFilters() {
   document.getElementById('q').value = '';
   document.getElementById('f-category').value = '';
   document.getElementById('f-account').value = '';
+  document.getElementById('f-account-id').value = '';
   document.getElementById('f-month').value = '';
   document.getElementById('f-amt-min').value = '';
   document.getElementById('f-amt-max').value = '';
@@ -321,6 +335,7 @@ async function loadPage(page) {
     q:                document.getElementById('q').value.trim(),
     category:         document.getElementById('f-category').value,
     account_subtype:  document.getElementById('f-account').value,
+    account_id:       document.getElementById('f-account-id').value,
     month:            document.getElementById('f-month').value,
     amt_min:          document.getElementById('f-amt-min').value,
     amt_max:          document.getElementById('f-amt-max').value,
@@ -674,7 +689,7 @@ document.getElementById('rule-modal').addEventListener('click', e => {
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
   populateMonthSelect();
-  await loadCategories();
+  await Promise.all([loadCategories(), loadAccountList()]);
   loadPage(1);
   // Pre-load rule count
   fetch('/reports/api/classification_rules').then(r => r.json()).then(rules => {
