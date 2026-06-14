@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Local AI</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; display: flex; flex-direction: column; }
+
+    .topbar { background: #1a1a2e; color: #eee; padding: .75rem 1.5rem; display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+    .topbar h1 { margin: 0; font-size: 1.05rem; color: #fff; }
+    .topbar a  { color: #aad4f5; font-size: .88rem; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+    .status { margin-left: auto; font-size: .8rem; display: flex; align-items: center; gap: .4rem; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #888; }
+    .dot.ok { background: #2ecc71; } .dot.bad { background: #e74c3c; }
+
+    .wrap { flex: 1; display: flex; flex-direction: column; max-width: 860px; width: 100%; margin: 0 auto; padding: 1rem 1rem 0; min-height: 0; }
+
+    .context-box { background: #fff; border: 1px solid #e3e6ea; border-radius: 8px; margin-bottom: .75rem; font-size: .82rem; }
+    .context-box summary { cursor: pointer; padding: .5rem .75rem; color: #555; font-weight: 600; user-select: none; }
+    .context-box pre { margin: 0; padding: .5rem .85rem .75rem; white-space: pre-wrap; color: #444; font-family: ui-monospace, monospace; font-size: .76rem; max-height: 240px; overflow: auto; border-top: 1px solid #eee; }
+
+    #messages { flex: 1; overflow-y: auto; padding: .25rem 0 1rem; min-height: 0; }
+    .msg { display: flex; gap: .6rem; margin-bottom: 1rem; }
+    .msg .avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; color: #fff; }
+    .msg.user .avatar { background: #0078d7; }
+    .msg.ai   .avatar { background: #6b46c1; }
+    .msg .bubble { background: #fff; border-radius: 10px; padding: .65rem .9rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: .92rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-width: 100%; }
+    .msg.user .bubble { background: #eef6ff; }
+    .msg .role { font-size: .7rem; color: #999; margin-bottom: .15rem; text-transform: uppercase; letter-spacing: .04em; }
+
+    .suggest { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+    .suggest button { background: #fff; border: 1px solid #d6dbe1; border-radius: 999px; padding: .35rem .8rem; font-size: .82rem; cursor: pointer; color: #444; }
+    .suggest button:hover { border-color: #0078d7; color: #0078d7; }
+
+    .composer { display: flex; gap: .5rem; padding: .6rem 0 1rem; }
+    .composer textarea { flex: 1; resize: none; padding: .6rem .75rem; border: 1px solid #ccd; border-radius: 8px; font-size: .95rem; font-family: inherit; height: 46px; max-height: 160px; }
+    .composer button { padding: 0 1.2rem; background: #6b46c1; color: #fff; border: none; border-radius: 8px; font-size: .95rem; font-weight: 600; cursor: pointer; }
+    .composer button:disabled { background: #b3a3da; cursor: default; }
+    .hint { font-size: .72rem; color: #999; padding-bottom: .6rem; }
+    .empty-state { text-align: center; color: #999; padding: 2rem 1rem; }
+    .empty-state h2 { color: #555; font-size: 1.1rem; margin: .3rem 0; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>🤖 Local AI</h1>
+  <a href="/reports">← Reports</a>
+  <a href="/reports/monthly">Monthly Cashflow</a>
+  <a href="/reports/budget">Budget</a>
+  <a href="/reports/goals">Savings Goals</a>
+  <span class="status"><span class="dot" id="status-dot"></span><span id="status-text">checking…</span></span>
+</div>
+
+<div class="wrap">
+  <details class="context-box">
+    <summary>🔒 What the AI can see (runs locally — nothing leaves this machine)</summary>
+    <pre id="context-pre">Loading…</pre>
+  </details>
+
+  <div id="messages">
+    <div class="empty-state" id="empty">
+      <div style="font-size:2rem">🤖</div>
+      <h2>Ask about your finances</h2>
+      <p>Powered by your local Ollama model — your data never leaves your computer.</p>
+    </div>
+  </div>
+
+  <div class="suggest" id="suggest">
+    <button onclick="ask(this.textContent)">Am I on track for my savings goal?</button>
+    <button onclick="ask(this.textContent)">What are my biggest account balances?</button>
+    <button onclick="ask(this.textContent)">How is my net investment trending and why?</button>
+    <button onclick="ask(this.textContent)">Summarize my budget vs my spending.</button>
+  </div>
+
+  <div class="composer">
+    <textarea id="input" placeholder="Ask about your money…" onkeydown="onKey(event)"></textarea>
+    <button id="send" onclick="send()">Send</button>
+  </div>
+  <div class="hint" id="hint"></div>
+</div>
+
+<script>
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let history = [];      // {role, content}
+  let busy = false;
+
+  async function checkStatus() {
+    try {
+      const s = await fetch('/reports/api/ai/status').then(r => r.json());
+      const dot = document.getElementById('status-dot'), txt = document.getElementById('status-text');
+      if (s.ok) { dot.className = 'dot ok'; txt.textContent = (s.default || 'model') + ' · local'; }
+      else { dot.className = 'dot bad'; txt.textContent = 'Ollama offline'; }
+    } catch { document.getElementById('status-text').textContent = 'status error'; }
+  }
+  async function loadContext() {
+    try {
+      const c = await fetch('/reports/api/ai/context').then(r => r.json());
+      document.getElementById('context-pre').textContent = c.context || '(empty)';
+    } catch { document.getElementById('context-pre').textContent = 'Could not load context.'; }
+  }
+
+  function addMsg(role, text) {
+    const empty = document.getElementById('empty'); if (empty) empty.remove();
+    const el = document.createElement('div');
+    el.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+    el.innerHTML = `<div class="avatar">${role === 'user' ? 'You' : 'AI'}</div>
+      <div><div class="role">${role === 'user' ? 'You' : 'Local AI'}</div>
+      <div class="bubble"></div></div>`;
+    el.querySelector('.bubble').textContent = text;
+    document.getElementById('messages').appendChild(el);
+    scrollDown();
+    return el.querySelector('.bubble');
+  }
+  function scrollDown() { const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
+
+  function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
+  function ask(text) { document.getElementById('input').value = text; send(); }
+
+  async function send() {
+    const inp = document.getElementById('input');
+    const text = inp.value.trim();
+    if (!text || busy) return;
+    inp.value = '';
+    busy = true;
+    document.getElementById('send').disabled = true;
+    document.getElementById('suggest').style.display = 'none';
+
+    addMsg('user', text);
+    history.push({ role: 'user', content: text });
+    const bubble = addMsg('ai', '');
+    bubble.textContent = '…';
+
+    try {
+      const resp = await fetch('/reports/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history }),
+      });
+      if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let acc = '';
+      bubble.textContent = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        acc += dec.decode(value, { stream: true });
+        bubble.textContent = acc;
+        scrollDown();
+      }
+      history.push({ role: 'assistant', content: acc });
+    } catch (e) {
+      bubble.textContent = 'Error: ' + e.message + ' (is Ollama running?)';
+    } finally {
+      busy = false;
+      document.getElementById('send').disabled = false;
+      inp.focus();
+    }
+  }
+
+  checkStatus();
+  loadContext();
+</script>
+</body>
+</html>
