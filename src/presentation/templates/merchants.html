@@ -128,6 +128,9 @@
     <option value="">All Categories</option>
     <option value="__none__">Uncategorized</option>
   </select>
+  <select id="f-account" onchange="reloadMerchants()" title="Filter by account">
+    <option value="">All Accounts</option>
+  </select>
   <select id="f-sort" onchange="applyFilters()">
     <option value="total_out">Sort: Total Spent ↓</option>
     <option value="tx_count">Sort: # Transactions ↓</option>
@@ -176,8 +179,20 @@ async function init() {
     const o = document.createElement('option'); o.value=c; o.textContent=c; sel.appendChild(o);
   });
 
-  // Load merchants
-  allMerchants = await fetch('/reports/api/merchants').then(r=>r.json()).catch(()=>[]);
+  // Load account options
+  const accts = await fetch('/reports/api/transactions/accounts').then(r=>r.json()).catch(()=>[]);
+  const asel = document.getElementById('f-account');
+  accts.forEach(a => {
+    const o = document.createElement('option'); o.value=a.account_id; o.textContent=a.label; asel.appendChild(o);
+  });
+
+  await reloadMerchants();
+}
+
+async function reloadMerchants() {
+  const aid = document.getElementById('f-account').value;
+  const qs  = aid ? '?account_id=' + encodeURIComponent(aid) : '';
+  allMerchants = await fetch('/reports/api/merchants' + qs).then(r=>r.json()).catch(()=>[]);
   updateSummary(allMerchants);
   applyFilters();
 }
@@ -222,6 +237,8 @@ function clearFilters() {
   document.getElementById('q').value = '';
   document.getElementById('f-category').value = '';
   document.getElementById('f-sort').value = 'total_out';
+  const acct = document.getElementById('f-account');
+  if (acct.value) { acct.value = ''; reloadMerchants(); return; }
   applyFilters();
 }
 

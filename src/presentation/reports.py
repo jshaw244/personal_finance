@@ -302,6 +302,16 @@ def _filter_by_range(df: pd.DataFrame, range_key: str,
         return df
     return df[df["date"].dt.date >= s]
 
+
+def _filter_by_account(df: pd.DataFrame, account_id: "str | None" = None) -> pd.DataFrame:
+    """Restrict to one account when account_id is provided (else unchanged).
+    account_id defaults to the request's ?account_id= when not passed explicitly."""
+    if account_id is None:
+        account_id = (request.args.get("account_id") or "").strip()
+    if account_id and not df.empty and "account_id" in df.columns:
+        return df[df["account_id"] == account_id]
+    return df
+
 # -------------------------------------------------------------------
 # E3: SQLite views + summary table enforcement (with full logging)
 # -------------------------------------------------------------------
@@ -413,6 +423,7 @@ def list_reports_json():
 def api_spending_by_category():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty or "category" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
 
@@ -437,6 +448,7 @@ def api_spending_by_category():
 def api_monthly_trend():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty or "date" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
 
@@ -466,6 +478,7 @@ def api_monthly_trend():
 def api_top_merchants():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty or "amount" not in df.columns:
         return jsonify({"error": "no transaction detail available"}), 404
     merchant_col = "merchant_name" if "merchant_name" in df.columns else ("name" if "name" in df.columns else None)
@@ -574,6 +587,7 @@ def api_paycycle_53():
 def api_kpi_summary():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty or "amount" not in df.columns or "date" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
 
@@ -620,6 +634,7 @@ def api_kpi_summary():
 def api_income_expense_split():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty or "amount" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
 
@@ -643,6 +658,7 @@ def api_income_expense_split():
 def api_category_trends():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty or "category" not in df.columns or "amount" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
 
@@ -662,6 +678,7 @@ def api_spending_trend():
     """Top-N category spending by month — used for the trend line chart."""
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", "ytd"),
                           request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty:
         return jsonify({"categories": [], "months": [], "series": {}})
 
@@ -791,6 +808,7 @@ def api_account_history():
 def api_cashflow_summary():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty or "amount" not in df.columns or "date" not in df.columns:
         return jsonify({"error": "no transaction data"}), 404
     df = df.copy()
@@ -798,8 +816,9 @@ def api_cashflow_summary():
     df = df.dropna(subset=["date"])
     df["month"] = df["date"].dt.to_period("M").astype(str)
 
-    # Filter to checking account — this view tracks cash movement through checking only.
-    if "account_subtype" in df.columns:
+    # Default (All) tracks cash movement through checking only. When a specific
+    # account is selected (_filter_by_account already applied it), show that account.
+    if not (request.args.get("account_id") or "").strip() and "account_subtype" in df.columns:
         df = df[df["account_subtype"].str.lower().fillna("").eq("checking")]
 
     if "exclude_from_spend" not in df.columns:
@@ -889,6 +908,7 @@ def api_recurring_merchants():
     """
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
 
     # ✅ Defensive guard for missing or empty data
     if df.empty or "amount" not in df.columns:
@@ -986,6 +1006,7 @@ def api_recurring_merchants():
 def api_top_transactions():
     df = _filter_by_range(_load_tx_detail(), request.args.get("range", ""),
                          request.args.get("start"), request.args.get("end"))
+    df = _filter_by_account(df)
     if df.empty:
         return jsonify({"error": "no transaction data"}), 404
     df = df.copy()
@@ -3867,6 +3888,7 @@ def merchants_page():
 @login_required
 def api_merchants():
     """Aggregate transactions by merchant with category, count, total, last date."""
+    account_id = (request.args.get("account_id") or "").strip()
     conn = sqlite3.connect(str(DB_PATH), timeout=30)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=30000;")
@@ -3893,9 +3915,10 @@ def api_merchants():
             FROM transactions t
             LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
             WHERE IFNULL(t.pending, 0) = 0
+              AND (? = '' OR t.account_id = ?)
             GROUP BY LOWER(COALESCE(t.merchant_name, t.name, ''))
             ORDER BY total_out DESC
-        """).fetchall()
+        """, (account_id, account_id)).fetchall()
     finally:
         conn.close()
 
