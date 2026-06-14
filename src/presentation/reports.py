@@ -14,8 +14,10 @@ Includes:
 
 from flask import (
     Blueprint, render_template, send_from_directory, abort,
-    jsonify, request, redirect, url_for, flash, current_app
+    jsonify, request, redirect, url_for, flash, current_app,
+    Response, stream_with_context
 )
+import requests
 
 from flask_login import (
     LoginManager, UserMixin, login_user, logout_user,
@@ -4564,3 +4566,174 @@ def api_budget_plan():
         })
     finally:
         conn.close()
+
+
+# ===================================================================
+# Local AI assistant (Ollama) — finance-aware, summary context, fully local
+# ===================================================================
+
+OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+_AI_SYSTEM_PROMPT = (
+    "You are a private, local financial assistant embedded in the user's personal "
+    "finance dashboard. You run on the user's own machine via Ollama, so their data "
+    "stays private. Answer questions about the user's money using ONLY the financial "
+    "summary provided below. Be concise and concrete; use the actual dollar figures. "
+    "If the summary doesn't contain the answer, say what's missing and suggest which "
+    "dashboard page would have it (Monthly Cashflow, Accounts, Budget, Savings Goals, "
+    "Transactions). Do not invent numbers. Note key context: the brokerage is being "
+    "drawn down intentionally to pay for a car, so a negative net investment is expected."
+)
+
+
+def _flow_totals_summary(conn) -> dict:
+    """Compact overall flow-type net totals (mirrors /api/flow_type/report)."""
+    rows = conn.execute("""
+        SELECT t.amount, t.name AS tx_name, a.type AS acct_type, a.subtype,
+               tc.user_category, tc.exclude_reason, tm.payload_json
+        FROM transactions t
+        JOIN accounts a ON a.account_id = t.account_id
+        LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+        LEFT JOIN transaction_meta tm ON tm.transaction_id = t.transaction_id
+        WHERE IFNULL(t.pending, 0) = 0
+    """).fetchall()
+    tot = {ft: 0.0 for ft in _FLOW_TYPES}
+    for r in rows:
+        pfcd = ""
+        if r["payload_json"]:
+            try:
+                pfcd = (json.loads(r["payload_json"]).get("personal_finance_category") or {}).get("detailed") or ""
+            except Exception:
+                pass
+        ft  = _derive_flow_type(r["acct_type"], r["subtype"], r["amount"],
+                                r["user_category"], r["exclude_reason"], pfcd, r["tx_name"])
+        amt = float(r["amount"] or 0)
+        tot[ft] += amt if ft in ("savings", "investment") else abs(amt)
+    tot["expense_net"] = round(tot["expense"] - tot["refund"], 2)
+    return {k: round(v, 2) for k, v in tot.items()}
+
+
+def _build_ai_context() -> str:
+    """A compact, readable finance summary fed to the local model."""
+    lines = []
+    conn = _goals_connect()
+    try:
+        lines.append(f"As of {date.today().isoformat()}.\n")
+
+        lines.append("ACCOUNT BALANCES:")
+        for r in conn.execute("""
+            SELECT a.name, a.type, a.subtype, a.current, i.institution_name
+            FROM accounts a JOIN items i ON i.item_id = a.item_id
+            WHERE a.current IS NOT NULL
+            ORDER BY a.type, a.subtype, a.name
+        """).fetchall():
+            lines.append(f"  - {r['institution_name']} {r['name']} ({r['subtype'] or r['type']}): ${r['current']:,.2f}")
+
+        try:
+            f = _flow_totals_summary(conn)
+            lines.append("\nFLOW TOTALS (all history, net):")
+            lines.append(f"  income ${f['income']:,.0f}; true expense ${f['expense_net']:,.0f}; "
+                         f"net savings ${f['savings']:,.0f}; net investment ${f['investment']:,.0f} "
+                         f"(negative = intentional brokerage drawdown for car)")
+        except Exception:
+            pass
+
+        try:
+            _ensure_savings_goals_table(conn)
+            g = conn.execute("SELECT * FROM savings_goals WHERE status='active' ORDER BY id DESC LIMIT 1").fetchone()
+            if g:
+                st = _compute_goal_stats(g, _total_savings_now(conn))
+                lines.append("\nSAVINGS GOAL:")
+                lines.append(f"  {st['name']}: ${st['progress']:,.0f} of ${st['target_amount']:,.0f} by "
+                             f"{st['end_date']} ({st['pct']}%); needs ${st['need_monthly']:,.0f}/mo; "
+                             f"{'on track' if st['on_track'] else 'behind pace'}.")
+        except Exception:
+            pass
+
+        try:
+            _ensure_budget_tables(conn)
+            plan = conn.execute("SELECT category, tier, target_amount FROM budget_plan WHERE target_amount > 0").fetchall()
+            exp_income = float(_budget_settings_get(conn, "expected_income", 0) or 0)
+            if plan or exp_income:
+                tiers = {"need": 0.0, "want": 0.0, "savings": 0.0}
+                for p in plan:
+                    tiers[p["tier"]] = tiers.get(p["tier"], 0.0) + float(p["target_amount"])
+                lines.append("\nBUDGET (monthly targets):")
+                if exp_income:
+                    lines.append(f"  expected income ${exp_income:,.0f}/mo")
+                lines.append(f"  needs ${tiers['need']:,.0f}; wants ${tiers['want']:,.0f}; savings ${tiers['savings']:,.0f}")
+        except Exception:
+            pass
+    finally:
+        conn.close()
+    return "\n".join(lines)
+
+
+@reports_bp.route("/ai")
+@login_required
+def ai_page():
+    return render_template("ai.html")
+
+
+@reports_bp.route("/api/ai/status")
+@login_required
+def api_ai_status():
+    try:
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=4)
+        r.raise_for_status()
+        models = [m.get("name") for m in (r.json().get("models") or [])]
+        return jsonify({"ok": True, "models": models, "default": OLLAMA_MODEL})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "url": OLLAMA_URL}), 503
+
+
+@reports_bp.route("/api/ai/chat", methods=["POST"])
+@login_required
+def api_ai_chat():
+    body     = request.get_json(silent=True) or {}
+    messages = body.get("messages") or []
+    model    = (body.get("model") or OLLAMA_MODEL).strip()
+
+    try:
+        context = _build_ai_context()
+    except Exception as e:
+        context = f"(failed to build financial context: {e})"
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _AI_SYSTEM_PROMPT + "\n\n=== FINANCIAL SUMMARY ===\n" + context},
+            *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages],
+        ],
+        "stream": True,
+    }
+
+    def generate():
+        try:
+            with requests.post(f"{OLLAMA_URL}/api/chat", json=payload, stream=True, timeout=120) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line.decode("utf-8"))
+                    except Exception:
+                        continue
+                    chunk = (obj.get("message") or {}).get("content", "")
+                    if chunk:
+                        yield chunk
+                    if obj.get("done"):
+                        break
+        except Exception as e:
+            yield f"\n\n[Local AI error: {e}. Is Ollama running at {OLLAMA_URL}?]"
+
+    return Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+
+
+@reports_bp.route("/api/ai/context")
+@login_required
+def api_ai_context():
+    """Expose the exact summary the AI sees (for the 'what can it see' panel)."""
+    return jsonify({"context": _build_ai_context()})
+
