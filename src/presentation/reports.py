@@ -4693,6 +4693,187 @@ def _build_ai_context() -> str:
     return "\n".join(lines)
 
 
+# ---- Tools the local model can call for specifics (beyond the summary) ----
+
+_ACCT_ALIASES = {
+    "amex": "american express", "53": "fifth third", "5/3": "fifth third",
+    "cap one": "capital one", "capone": "capital one", "schwab": "charles schwab",
+    "checking": "momentum checking", "brokerage": "individual",
+}
+
+
+def _resolve_account_id(name: str):
+    """Fuzzy-match a free-text account name to (account_id, label)."""
+    if not name:
+        return None, None
+    n = name.lower().strip()
+    expanded = n
+    for k, v in _ACCT_ALIASES.items():
+        if k in n:
+            expanded += " " + v
+    want = set(re.findall(r"[a-z0-9]+", expanded))
+    conn = _goals_connect()
+    try:
+        rows = conn.execute("""
+            SELECT a.account_id, a.name, a.subtype, i.institution_name
+            FROM accounts a JOIN items i ON i.item_id = a.item_id
+        """).fetchall()
+    finally:
+        conn.close()
+    best, best_score = None, 0
+    for r in rows:
+        label = f"{r['institution_name']} {r['name']} {r['subtype'] or ''}".lower()
+        score = len(want & set(re.findall(r"[a-z0-9]+", label)))
+        if n and n in label:
+            score += 5
+        if score > best_score:
+            best, best_score = r, score
+    if best and best_score > 0:
+        return best["account_id"], f"{best['institution_name']} {best['name']}"
+    return None, None
+
+
+def _df_account_filter(df, account_id):
+    """In-process account filter (no request dependency, for AI tools)."""
+    if account_id and not df.empty and "account_id" in df.columns:
+        return df[df["account_id"] == account_id]
+    return df
+
+
+def _tool_list_accounts(**_):
+    conn = _goals_connect()
+    try:
+        rows = conn.execute("""
+            SELECT a.name, a.type, a.subtype, a.current, i.institution_name
+            FROM accounts a JOIN items i ON i.item_id = a.item_id
+            WHERE a.current IS NOT NULL ORDER BY a.type, a.current DESC
+        """).fetchall()
+    finally:
+        conn.close()
+    return {"accounts": [{"name": f"{r['institution_name']} {r['name']}",
+                          "type": r["subtype"] or r["type"],
+                          "balance": round(float(r["current"]), 2)} for r in rows]}
+
+
+def _tool_flow_summary(**_):
+    conn = _goals_connect()
+    try:
+        return _flow_totals_summary(conn)
+    finally:
+        conn.close()
+
+
+def _tool_account_cashflow(account="", month="", **_):
+    aid, label = _resolve_account_id(account)
+    if not aid:
+        return {"error": f"no account matching '{account}'"}
+    month = (month or _month_key(date.today()))[:7]
+    conn = _goals_connect()
+    try:
+        rows = conn.execute("""
+            SELECT t.name, t.merchant_name, t.amount, COALESCE(tc.user_category,'') AS cat
+            FROM transactions t
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            WHERE t.account_id = ? AND t.date LIKE ? AND IFNULL(t.pending,0)=0
+        """, (aid, f"{month}%")).fetchall()
+    finally:
+        conn.close()
+    tin = tout = 0.0
+    charges = []
+    for r in rows:
+        amt = float(r["amount"] or 0)
+        if amt < 0:
+            tin += abs(amt)
+        elif amt > 0:
+            tout += amt
+            charges.append(((r["merchant_name"] or r["name"] or "")[:40], round(amt, 2), r["cat"]))
+    charges.sort(key=lambda x: -x[1])
+    return {"account": label, "month": month, "total_in": round(tin, 2),
+            "total_out": round(tout, 2), "net": round(tin - tout, 2),
+            "top_charges": [{"merchant": m, "amount": a, "category": c} for m, a, c in charges[:8]]}
+
+
+def _tool_spending_by_category(range="12m", account="", **_):
+    aid, label = _resolve_account_id(account) if account else (None, "all accounts")
+    df = _df_account_filter(_filter_by_range(_load_tx_detail(), range or "12m"), aid)
+    if df.empty:
+        return {"by_category": {}}
+    exp = df[(~df["is_income"]) & (df["exclude_from_spend"] == 0) & (df["amount"] > 0)]
+    cats = exp.groupby("category")["amount"].sum().round(2).sort_values(ascending=False)
+    return {"account": label, "range": range or "12m",
+            "by_category": {str(k): float(v) for k, v in cats.head(15).items()}}
+
+
+def _tool_top_merchants(range="12m", account="", limit=10, **_):
+    aid, label = _resolve_account_id(account) if account else (None, "all accounts")
+    df = _df_account_filter(_filter_by_range(_load_tx_detail(), range or "12m"), aid)
+    if df.empty:
+        return {"merchants": []}
+    out = df[df["amount"] > 0].copy()
+    out["m"] = out["merchant_name"].fillna(out["name"])
+    g = out.groupby("m")["amount"].agg(["sum", "count"]).sort_values("sum", ascending=False).head(int(limit or 10))
+    return {"account": label, "range": range or "12m",
+            "merchants": [{"merchant": str(k), "total": round(float(r["sum"]), 2),
+                           "count": int(r["count"])} for k, r in g.iterrows()]}
+
+
+_AI_TOOL_FNS = {
+    "list_accounts":          _tool_list_accounts,
+    "get_flow_summary":       _tool_flow_summary,
+    "get_account_cashflow":   _tool_account_cashflow,
+    "get_spending_by_category": _tool_spending_by_category,
+    "get_top_merchants":      _tool_top_merchants,
+}
+
+_AI_TOOLS = [
+    {"type": "function", "function": {
+        "name": "list_accounts",
+        "description": "List the user's accounts (name, type, current balance).",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "get_flow_summary",
+        "description": "Net flow totals over all history: income, true expense, net savings, net investment.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "get_account_cashflow",
+        "description": "Money in vs out and top charges for one account in one month.",
+        "parameters": {"type": "object", "properties": {
+            "account": {"type": "string", "description": "Account name, e.g. 'Amex' or 'Fifth Third checking'"},
+            "month":   {"type": "string", "description": "Month as YYYY-MM, e.g. 2026-05"},
+        }, "required": ["account", "month"]},
+    }},
+    {"type": "function", "function": {
+        "name": "get_spending_by_category",
+        "description": "Total spending grouped by category, optionally for one account.",
+        "parameters": {"type": "object", "properties": {
+            "range":   {"type": "string", "description": "30d, ytd, or 12m", "enum": ["30d", "ytd", "12m"]},
+            "account": {"type": "string", "description": "Optional account name; omit for all accounts"},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "get_top_merchants",
+        "description": "Top merchants by spend, optionally for one account.",
+        "parameters": {"type": "object", "properties": {
+            "range":   {"type": "string", "enum": ["30d", "ytd", "12m"]},
+            "account": {"type": "string", "description": "Optional account name; omit for all accounts"},
+            "limit":   {"type": "integer", "description": "How many merchants (default 10)"},
+        }},
+    }},
+]
+
+
+def _run_ai_tool(name, args):
+    fn = _AI_TOOL_FNS.get(name)
+    if not fn:
+        return {"error": f"unknown tool {name}"}
+    try:
+        return fn(**(args or {}))
+    except Exception as e:
+        return {"error": f"tool {name} failed: {e}"}
+
+
 @reports_bp.route("/ai")
 @login_required
 def ai_page():
@@ -4711,6 +4892,26 @@ def api_ai_status():
         return jsonify({"ok": False, "error": str(e), "url": OLLAMA_URL}), 503
 
 
+_AI_TOOLS_HINT = (
+    "\n\nYou also have TOOLS to fetch specifics beyond the summary: list_accounts, "
+    "get_flow_summary, get_account_cashflow(account, month), "
+    "get_spending_by_category(range, account?), get_top_merchants(range, account?). "
+    "Call a tool whenever the question needs a specific month, account, category, or "
+    "merchant detail not in the summary. Refer to accounts by name (e.g. 'Amex', "
+    "'Fifth Third checking'). After getting tool results, answer concisely with the "
+    "real figures. Never invent numbers — use a tool or say it's not available."
+)
+
+
+def _ollama_chat(messages, model, tools=None):
+    payload = {"model": model, "messages": messages, "stream": False}
+    if tools:
+        payload["tools"] = tools
+    r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=180)
+    r.raise_for_status()
+    return r.json()
+
+
 @reports_bp.route("/api/ai/chat", methods=["POST"])
 @login_required
 def api_ai_chat():
@@ -4723,35 +4924,46 @@ def api_ai_chat():
     except Exception as e:
         context = f"(failed to build financial context: {e})"
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": _AI_SYSTEM_PROMPT + "\n\n=== FINANCIAL SUMMARY ===\n" + context},
-            *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages],
-        ],
-        "stream": True,
-    }
+    system = _AI_SYSTEM_PROMPT + _AI_TOOLS_HINT + "\n\n=== FINANCIAL SUMMARY ===\n" + context
+    convo = [{"role": "system", "content": system},
+             *[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages]]
+
+    def emit(obj):
+        return json.dumps(obj, default=str) + "\n"
 
     def generate():
         try:
-            with requests.post(f"{OLLAMA_URL}/api/chat", json=payload, stream=True, timeout=120) as resp:
-                resp.raise_for_status()
-                for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line.decode("utf-8"))
-                    except Exception:
-                        continue
-                    chunk = (obj.get("message") or {}).get("content", "")
-                    if chunk:
-                        yield chunk
-                    if obj.get("done"):
-                        break
+            # Agentic loop: let the model call tools, feed results back, repeat.
+            for _round in range(5):
+                data = _ollama_chat(convo, model, tools=_AI_TOOLS)
+                msg  = data.get("message") or {}
+                tool_calls = msg.get("tool_calls") or []
+                if tool_calls:
+                    convo.append(msg)
+                    for tc in tool_calls:
+                        fn   = tc.get("function") or {}
+                        name = fn.get("name")
+                        args = fn.get("arguments") or {}
+                        if isinstance(args, str):
+                            try: args = json.loads(args)
+                            except Exception: args = {}
+                        yield emit({"type": "tool", "name": name, "args": args})
+                        result = _run_ai_tool(name, args)
+                        convo.append({"role": "tool", "content": json.dumps(result, default=str)})
+                    continue
+                # No tool call → this is the answer.
+                yield emit({"type": "token", "text": msg.get("content", "") or "(no response)"})
+                yield emit({"type": "done"})
+                return
+            # Hit the round cap — force a final answer with no tools.
+            data = _ollama_chat(convo + [{"role": "user",
+                    "content": "Answer now using the tool results above; do not call more tools."}], model)
+            yield emit({"type": "token", "text": (data.get("message") or {}).get("content", "") or "(no response)"})
+            yield emit({"type": "done"})
         except Exception as e:
-            yield f"\n\n[Local AI error: {e}. Is Ollama running at {OLLAMA_URL}?]"
+            yield emit({"type": "error", "text": f"{e}. Is Ollama running at {OLLAMA_URL}?"})
 
-    return Response(stream_with_context(generate()), mimetype="text/plain; charset=utf-8")
+    return Response(stream_with_context(generate()), mimetype="application/x-ndjson; charset=utf-8")
 
 
 @reports_bp.route("/api/ai/context")
