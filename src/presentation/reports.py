@@ -1858,6 +1858,7 @@ def api_account_balances():
             due_date   = sched_due[r["account_id"]]["due_date"]
             due_source = "autopay"
         accounts.append({
+            "account_id":   r["account_id"],
             "name":         r["name"],
             "institution":  r["institution_name"],
             "type":         r["type"],
@@ -1915,6 +1916,65 @@ def api_account_balances():
         pass
 
     return jsonify(accounts)
+
+
+@reports_bp.route("/api/account_cashflow")
+@login_required
+def api_account_cashflow():
+    """Per-account cash flow for one month: money in (amount<0) vs out (amount>0).
+    Used by the Monthly Cashflow page when a single account tile is selected."""
+    account_id = (request.args.get("account_id") or "").strip()
+    month      = (request.args.get("month") or _month_key(date.today())).strip()
+    if not account_id:
+        return jsonify({"error": "account_id required"}), 400
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.row_factory = sqlite3.Row
+    try:
+        acct = conn.execute("""
+            SELECT a.name, a.type, a.subtype, i.institution_name
+            FROM accounts a JOIN items i ON i.item_id = a.item_id
+            WHERE a.account_id = ?
+        """, (account_id,)).fetchone()
+        rows = conn.execute("""
+            SELECT t.date, t.name, t.merchant_name, t.amount,
+                   COALESCE(tc.user_category, '') AS category
+            FROM transactions t
+            LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+            WHERE t.account_id = ? AND t.date LIKE ? AND IFNULL(t.pending, 0) = 0
+            ORDER BY t.date ASC, t.amount DESC
+        """, (account_id, f"{month}%")).fetchall()
+    finally:
+        conn.close()
+
+    money_in, money_out = [], []
+    tin = tout = 0.0
+    for r in rows:
+        amt = float(r["amount"] or 0)
+        item = {
+            "date":     r["date"],
+            "label":    (r["merchant_name"] or r["name"] or "")[:48],
+            "category": r["category"],
+            "amount":   round(abs(amt), 2),
+        }
+        if amt < 0:        # money IN (deposit / credit / refund / payment received)
+            money_in.append(item);  tin += abs(amt)
+        elif amt > 0:      # money OUT (withdrawal / charge / transfer)
+            money_out.append(item); tout += abs(amt)
+
+    return jsonify({
+        "account": {
+            "name":        acct["name"] if acct else account_id,
+            "institution": acct["institution_name"] if acct else "",
+            "type":        acct["type"] if acct else "",
+            "subtype":     acct["subtype"] if acct else "",
+        },
+        "month":     month,
+        "money_in":  money_in,
+        "money_out": money_out,
+        "totals":    {"in": round(tin, 2), "out": round(tout, 2), "net": round(tin - tout, 2)},
+    })
 
 
 @reports_bp.route("/api/monthly_cashflow")
