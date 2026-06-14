@@ -30,6 +30,8 @@
     .msg .bubble { background: #fff; border-radius: 10px; padding: .65rem .9rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: .92rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-width: 100%; }
     .msg.user .bubble { background: #eef6ff; }
     .msg .role { font-size: .7rem; color: #999; margin-bottom: .15rem; text-transform: uppercase; letter-spacing: .04em; }
+    .msg .tools { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .35rem; }
+    .tool-chip { font-size: .72rem; color: #6b46c1; background: #f3effc; border: 1px solid #e3d9f7; border-radius: 6px; padding: .2rem .5rem; align-self: flex-start; font-family: ui-monospace, monospace; }
 
     .suggest { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
     .suggest button { background: #fff; border: 1px solid #d6dbe1; border-radius: 999px; padding: .35rem .8rem; font-size: .82rem; cursor: pointer; color: #444; }
@@ -107,13 +109,19 @@
     const empty = document.getElementById('empty'); if (empty) empty.remove();
     const el = document.createElement('div');
     el.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+    const inner = role === 'user'
+      ? `<div class="bubble"></div>`
+      : `<div class="tools"></div><div class="bubble"></div>`;
     el.innerHTML = `<div class="avatar">${role === 'user' ? 'You' : 'AI'}</div>
-      <div><div class="role">${role === 'user' ? 'You' : 'Local AI'}</div>
-      <div class="bubble"></div></div>`;
-    el.querySelector('.bubble').textContent = text;
+      <div style="min-width:0"><div class="role">${role === 'user' ? 'You' : 'Local AI'}</div>${inner}</div>`;
+    if (role === 'user') el.querySelector('.bubble').textContent = text;
     document.getElementById('messages').appendChild(el);
     scrollDown();
-    return el.querySelector('.bubble');
+    return el;
+  }
+  function toolLabel(name, args) {
+    const a = Object.entries(args || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+    return `🔧 ${name}${a ? '(' + a + ')' : ''}`;
   }
   function scrollDown() { const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
 
@@ -131,7 +139,9 @@
 
     addMsg('user', text);
     history.push({ role: 'user', content: text });
-    const bubble = addMsg('ai', '');
+    const aiEl   = addMsg('ai', '');
+    const bubble = aiEl.querySelector('.bubble');
+    const tools  = aiEl.querySelector('.tools');
     bubble.textContent = '…';
 
     try {
@@ -143,16 +153,36 @@
       if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
-      let acc = '';
-      bubble.textContent = '';
+      let buf = '', answer = '', started = false;
+
+      const handle = (ev) => {
+        if (ev.type === 'tool') {
+          const chip = document.createElement('div');
+          chip.className = 'tool-chip';
+          chip.textContent = toolLabel(ev.name, ev.args);
+          tools.appendChild(chip);
+        } else if (ev.type === 'token') {
+          if (!started) { bubble.textContent = ''; started = true; }
+          answer += ev.text;
+          bubble.textContent = answer;
+        } else if (ev.type === 'error') {
+          bubble.textContent = '⚠️ ' + ev.text;
+        }
+        scrollDown();
+      };
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        acc += dec.decode(value, { stream: true });
-        bubble.textContent = acc;
-        scrollDown();
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (!line) continue;
+          try { handle(JSON.parse(line)); } catch {}
+        }
       }
-      history.push({ role: 'assistant', content: acc });
+      history.push({ role: 'assistant', content: answer });
     } catch (e) {
       bubble.textContent = 'Error: ' + e.message + ' (is Ollama running?)';
     } finally {
