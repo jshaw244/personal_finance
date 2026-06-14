@@ -3497,8 +3497,10 @@ _FLOW_TYPES = ("expense", "income", "refund", "savings", "investment", "internal
 # ("Capital One Transfer" vs "Capital One CrCardPmt", "…Transfer to SV" vs
 # "…to CC", "Synchrony Bank Transfer" vs "AMZ_STORECRD_PMT").
 # Will be persisted as classification_rules in Stage 3.
-_INVEST_DEST  = ("schwab brokerage moneylink", "edward jones")
-_SAVINGS_DEST = ("synchrony bank transfer", "online transfer to sv",
+# Matched in BOTH directions: leaving checking = contribution, returning to
+# checking = withdrawal — so savings/investment can be netted (out − back).
+_INVEST_DEST  = ("schwab brokerage moneylink", "edward jones", "transfer from brokerage")
+_SAVINGS_DEST = ("synchrony bank", "online transfer to sv", "online transfer from sv",
                  "capital one transfer", "schwab bank transfer", "american airlines")
 
 
@@ -3530,16 +3532,22 @@ def _derive_flow_type(acct_type, subtype, amount, user_category, exclude_reason,
     sub    = (subtype or "").lower()
     amt    = float(amount or 0)
 
+    nm = (name or "").lower()
+
     # Money moving through a savings / brokerage / retirement account is the
     # receiving (or internal) leg — net it out. Keep interest/dividends as income.
     if sub == "savings" or at == "investment":
         return "income" if cat == "income" else "internal_transfer"
 
-    # Known recurring external transfers OUT of checking → savings/investment.
-    # Authoritative: overrides Plaid's mislabeled category/reason. Depository
-    # only, so it can never catch a same-named credit-card purchase.
-    if at == "depository" and amt > 0:
-        b = _external_transfer_bucket(name)
+    # Checking-account specifics (depository).
+    if at == "depository":
+        # Received Zelle = money in from a person → income.
+        if "received zelle" in nm and amt < 0:
+            return "income"
+        # Known external savings/investment destinations — matched in BOTH
+        # directions so withdrawals (money back into checking) net against
+        # contributions. Authoritative: overrides Plaid's mislabeled reason.
+        b = _external_transfer_bucket(nm)
         if b:
             return b
 
@@ -3600,8 +3608,14 @@ def api_flow_type_report():
     finally:
         conn.close()
 
+    # savings/investment are tracked NET: contributions (money leaving checking,
+    # amt>0) minus withdrawals (money coming back, amt<0). Other types use abs.
+    _NET = ("savings", "investment")
+
     def _blank():
-        return {ft: 0.0 for ft in _FLOW_TYPES}
+        d = {ft: 0.0 for ft in _FLOW_TYPES}
+        d.update(savings_out=0.0, savings_in=0.0, investment_out=0.0, investment_in=0.0)
+        return d
 
     overall = _blank()
     per_acct: dict = {}
@@ -3616,21 +3630,30 @@ def api_flow_type_report():
         ft = _derive_flow_type(r["acct_type"], r["subtype"], r["amount"],
                                r["user_category"], r["exclude_reason"], pfc_detailed,
                                r["tx_name"])
-        val = abs(float(r["amount"] or 0))
-        overall[ft] += val
+        amt = float(r["amount"] or 0)
         key = r["account_id"]
         if key not in per_acct:
             per_acct[key] = {
                 "account": f"{r['institution_name']} · {r['acct_name']}",
                 "type": r["acct_type"], "subtype": r["subtype"], **_blank(),
             }
-        per_acct[key][ft] += val
+        acct = per_acct[key]
+        if ft in _NET:
+            overall[ft] += amt          # signed net (out +, back −)
+            acct[ft]    += amt
+            side = "_out" if amt >= 0 else "_in"
+            overall[ft + side] += abs(amt)
+            acct[ft + side]    += abs(amt)
+        else:
+            overall[ft] += abs(amt)
+            acct[ft]    += abs(amt)
 
     def _finalize(d):
         d = {**d}
         d["expense_net"] = round(d["expense"] - d["refund"], 2)
-        for ft in _FLOW_TYPES:
-            d[ft] = round(d[ft], 2)
+        for k in list(d.keys()):
+            if isinstance(d[k], float):
+                d[k] = round(d[k], 2)
         return d
 
     accounts = sorted(
@@ -3640,8 +3663,9 @@ def api_flow_type_report():
     return jsonify({
         "overall": _finalize(overall),
         "accounts": accounts,
-        "note": "Read-only. expense_net = expense − refunds. internal_transfer is "
-                "money moved between your own accounts (netted out of spend).",
+        "note": "Read-only. expense_net = expense − refunds. savings/investment "
+                "are NET (contributions − withdrawals); *_out/*_in show the gross "
+                "sides. internal_transfer = movement between your own accounts.",
     })
 
 
