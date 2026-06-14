@@ -277,7 +277,7 @@ function showBalBanner(msg, type) {
 // ── Balance table ─────────────────────────────────────────────────────────────
 // /api/account_balances already merges Plaid + manual statement entries and
 // carries statement balance / date / due date on each row.
-const TYPE_ORDER = { depository: 0, credit: 1, investment: 2 };
+const TYPE_ORDER = { depository: 0, credit: 1, investment: 2, loan: 3 };
 
 async function loadBalances() {
   try {

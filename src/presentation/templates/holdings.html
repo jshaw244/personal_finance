@@ -135,6 +135,15 @@ function render(d) {
   }
   html += `<div class="card"><h2>Asset Allocation</h2><div class="alloc">${bar}</div><div class="legend">${legend}</div></div>`;
 
+  // Portfolio value trend (populated by loadTrend after render)
+  html += `<div class="card">
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      <h2 style="margin:0">Value Trend</h2>
+      <select id="trend-pick" onchange="drawTrend()" style="margin-left:auto;padding:.3rem .5rem;border:1px solid #ccd;border-radius:6px;font-size:.85rem"></select>
+    </div>
+    <div id="trend-body" style="margin-top:.7rem"><span style="color:#aaa;font-size:.85rem">Loading trend…</span></div>
+  </div>`;
+
   // Top concentrations
   if (d.top_holdings && d.top_holdings.length) {
     let rows = d.top_holdings.map(t => `<tr>
@@ -169,6 +178,82 @@ function render(d) {
   }
 
   document.getElementById('content').innerHTML = html;
+  loadTrend();
+}
+
+let TREND = null;
+async function loadTrend() {
+  try {
+    TREND = await fetch('/reports/api/holdings/trend').then(r => r.json());
+  } catch { TREND = {accounts:[], total:[]}; }
+  const pick = document.getElementById('trend-pick');
+  if (!pick) return;
+  let opts = `<option value="__total__">Total portfolio</option>`;
+  for (const a of (TREND.accounts || [])) opts += `<option value="${esc(a.account_id)}">${esc(a.name)}</option>`;
+  pick.innerHTML = opts;
+  // Default to the largest account (the brokerage) if present
+  if (TREND.accounts && TREND.accounts.length) pick.value = TREND.accounts[0].account_id;
+  drawTrend();
+}
+
+function drawTrend() {
+  const body = document.getElementById('trend-body'); if (!body || !TREND) return;
+  const pick = document.getElementById('trend-pick');
+  const sel = pick ? pick.value : '__total__';
+  const series = sel === '__total__'
+    ? (TREND.total || [])
+    : ((TREND.accounts.find(a => a.account_id === sel) || {}).series || []);
+
+  if (!series.length) {
+    body.innerHTML = '<span style="color:#aaa;font-size:.85rem">No snapshots yet.</span>';
+    return;
+  }
+  const first = series[0], last = series[series.length - 1];
+  const change = last.value - first.value;
+  const head = `<div style="display:flex;gap:1.4rem;flex-wrap:wrap;margin-bottom:.4rem">
+      <span style="font-size:1.3rem;font-weight:700;color:#1a1a2e">${fmt(last.value)}</span>
+      <span style="align-self:center;font-size:.85rem" class="${change>=0?'pos':'neg'}">
+        ${change>=0?'▲ +':'▼ '}${fmt(Math.abs(change)).slice(1)} since ${first.date}</span>
+    </div>`;
+
+  if (series.length === 1) {
+    body.innerHTML = head + `<div style="color:#999;font-size:.82rem">One snapshot so far (${last.date}). ` +
+      `The line builds each time you press <strong>Refresh from Plaid</strong> — check back after future refreshes to watch the drawdown and recovery.</div>`;
+    return;
+  }
+
+  // SVG line chart
+  const W = 720, H = 200, pad = {l: 64, r: 16, t: 12, b: 28};
+  const vals = series.map(p => p.value);
+  let mn = Math.min(...vals), mx = Math.max(...vals);
+  if (mn === mx) { mn -= 1; mx += 1; }
+  const pl = mn - (mx - mn) * 0.08, ph = mx + (mx - mn) * 0.08;
+  const n = series.length;
+  const x = i => pad.l + (W - pad.l - pad.r) * (n === 1 ? 0.5 : i / (n - 1));
+  const y = v => pad.t + (H - pad.t - pad.b) * (1 - (v - pl) / (ph - pl));
+
+  const line = series.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+  const area = `${line} L${x(n-1).toFixed(1)},${(H-pad.b).toFixed(1)} L${x(0).toFixed(1)},${(H-pad.b).toFixed(1)} Z`;
+  const up = change >= 0, col = up ? '#1a8a4a' : '#c0392b';
+
+  // gridlines / y labels (3)
+  let grid = '';
+  for (let g = 0; g <= 2; g++) {
+    const v = pl + (ph - pl) * g / 2, yy = y(v);
+    grid += `<line x1="${pad.l}" y1="${yy.toFixed(1)}" x2="${W-pad.r}" y2="${yy.toFixed(1)}" stroke="#eef0f3"/>`;
+    grid += `<text x="${pad.l-8}" y="${(yy+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#999">$${Math.round(v).toLocaleString()}</text>`;
+  }
+  const dots = series.map((p, i) =>
+    `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="2.5" fill="${col}"><title>${p.date}: ${fmt(p.value)}</title></circle>`).join('');
+  const xlabels = `<text x="${pad.l}" y="${H-8}" font-size="10" fill="#999">${first.date}</text>
+    <text x="${W-pad.r}" y="${H-8}" text-anchor="end" font-size="10" fill="#999">${last.date}</text>`;
+
+  body.innerHTML = head + `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="max-width:100%">
+    ${grid}
+    <path d="${area}" fill="${col}" opacity="0.08"/>
+    <path d="${line}" fill="none" stroke="${col}" stroke-width="2"/>
+    ${dots}${xlabels}
+  </svg>`;
 }
 
 async function refresh() {
