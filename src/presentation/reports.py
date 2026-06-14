@@ -1652,12 +1652,16 @@ def api_pay_calendar():
     paycheck_by_date: dict[str, float] = {}
 
     try:
-        # Depository transactions (extended range to capture tail-funding paycheck)
+        # Depository transactions (extended range to capture tail-funding paycheck).
+        # Exclude Charles Schwab "Investor Checking" — only Fifth Third checking
+        # represents the spending account on the pay-period calendar.
         for row in conn.execute("""
             SELECT t.date, t.name, t.merchant_name, t.amount
             FROM transactions t
             JOIN accounts a ON a.account_id = t.account_id
+            JOIN items i ON i.item_id = a.item_id
             WHERE a.type = 'depository'
+              AND NOT (a.subtype = 'checking' AND i.institution_name = 'Charles Schwab')
               AND t.date >= ? AND t.date <= ?
               AND IFNULL(t.pending, 0) = 0
             ORDER BY t.date ASC
@@ -4868,6 +4872,185 @@ def _tool_savings_goal(**_):
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Investment holdings (Plaid Investments product)
+# ---------------------------------------------------------------------------
+
+def _ensure_holdings_tables(conn) -> None:
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS securities (
+            security_id      TEXT PRIMARY KEY,
+            ticker_symbol    TEXT,
+            name             TEXT,
+            type             TEXT,
+            close_price      REAL,
+            close_price_date TEXT,
+            iso_currency     TEXT,
+            is_cash_equiv    INTEGER DEFAULT 0,
+            updated_at       TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS holdings (
+            account_id        TEXT NOT NULL,
+            security_id       TEXT NOT NULL,
+            quantity          REAL,
+            institution_price REAL,
+            institution_value REAL,
+            cost_basis        REAL,
+            iso_currency      TEXT,
+            updated_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (account_id, security_id)
+        );
+        CREATE TABLE IF NOT EXISTS holdings_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id  TEXT NOT NULL,
+            total_value REAL NOT NULL,
+            captured_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.commit()
+
+
+def _build_holdings(conn) -> dict:
+    """
+    Assemble the holdings view: per-account positions plus portfolio rollups
+    (by asset type, top concentrations, cash vs invested). Reads the normalized
+    holdings/securities tables populated by /investments/holdings.
+    """
+    _ensure_holdings_tables(conn)
+    rows = conn.execute("""
+        SELECT h.account_id, h.quantity, h.institution_price, h.institution_value,
+               h.cost_basis,
+               s.ticker_symbol, s.name AS sec_name, s.type AS sec_type, s.is_cash_equiv,
+               a.name AS acct_name, a.subtype, a.type AS acct_type,
+               i.institution_name
+        FROM holdings h
+        JOIN securities s ON s.security_id = h.security_id
+        JOIN accounts a   ON a.account_id  = h.account_id
+        JOIN items i      ON i.item_id     = a.item_id
+        ORDER BY h.institution_value DESC
+    """).fetchall()
+
+    accounts: dict = {}
+    by_type: dict = {}
+    cash_total = 0.0
+    grand_total = 0.0
+    all_positions: list = []
+
+    for r in rows:
+        aid = r["account_id"]
+        val = float(r["institution_value"] or 0.0)
+        cost = r["cost_basis"]
+        typ = (r["sec_type"] or "other").lower()
+        is_cash = bool(r["is_cash_equiv"])
+        ticker = r["ticker_symbol"] or ("CASH" if is_cash else "—")
+
+        pos = {
+            "ticker":   ticker,
+            "name":     r["sec_name"] or "",
+            "type":     typ,
+            "quantity": round(float(r["quantity"] or 0.0), 4),
+            "price":    round(float(r["institution_price"] or 0.0), 2),
+            "value":    round(val, 2),
+            "cost_basis": round(float(cost), 2) if cost is not None else None,
+            "gain":     round(val - float(cost), 2) if cost is not None else None,
+            "is_cash":  is_cash,
+        }
+
+        if aid not in accounts:
+            accounts[aid] = {
+                "account_id":  aid,
+                "name":        r["acct_name"],
+                "subtype":     r["subtype"],
+                "institution": r["institution_name"],
+                "total":       0.0,
+                "positions":   [],
+            }
+        accounts[aid]["positions"].append(pos)
+        accounts[aid]["total"] = round(accounts[aid]["total"] + val, 2)
+
+        tkey = "cash" if is_cash else typ
+        by_type[tkey] = round(by_type.get(tkey, 0.0) + val, 2)
+        if is_cash:
+            cash_total += val
+        grand_total += val
+        all_positions.append({**pos, "account": r["acct_name"]})
+
+    # Per-account position share
+    for a in accounts.values():
+        tot = a["total"] or 1.0
+        for p in a["positions"]:
+            p["pct_of_account"] = round(100.0 * p["value"] / tot, 1)
+
+    # Top concentrations across the whole portfolio (cash collapsed out)
+    invested = [p for p in all_positions if not p["is_cash"]]
+    invested.sort(key=lambda p: -p["value"])
+    gt = grand_total or 1.0
+    top = [{
+        "ticker": p["ticker"], "name": p["name"], "account": p["account"],
+        "value": p["value"], "pct_of_total": round(100.0 * p["value"] / gt, 1),
+    } for p in invested[:10]]
+
+    last = conn.execute(
+        "SELECT MAX(updated_at) AS u FROM holdings"
+    ).fetchone()
+
+    return {
+        "accounts":    sorted(accounts.values(), key=lambda a: -a["total"]),
+        "grand_total": round(grand_total, 2),
+        "cash_total":  round(cash_total, 2),
+        "invested_total": round(grand_total - cash_total, 2),
+        "by_type":     dict(sorted(by_type.items(), key=lambda kv: -kv[1])),
+        "top_holdings": top,
+        "updated_at":  last["u"] if last else None,
+    }
+
+
+@reports_bp.route("/holdings")
+@login_required
+def holdings_page():
+    return render_template("holdings.html")
+
+
+@reports_bp.route("/api/holdings")
+@login_required
+def api_holdings():
+    conn = _goals_connect()
+    try:
+        return jsonify(_build_holdings(conn))
+    finally:
+        conn.close()
+
+
+def _tool_holdings(account="", **_):
+    conn = _goals_connect()
+    try:
+        data = _build_holdings(conn)
+    finally:
+        conn.close()
+    if not data["accounts"]:
+        return {"note": "No investment holdings stored yet. The user can pull them "
+                        "with the Refresh button on the Holdings page."}
+    if account:
+        aid, label = _resolve_account_id(account)
+        accts = [a for a in data["accounts"] if a["account_id"] == aid] if aid else []
+        if not accts:
+            return {"note": f"No investment account matched '{account}'."}
+        a = accts[0]
+        return {"account": a["name"], "total": a["total"],
+                "positions": [{"ticker": p["ticker"], "name": p["name"],
+                               "value": p["value"], "pct": p["pct_of_account"]}
+                              for p in a["positions"]]}
+    return {
+        "grand_total": data["grand_total"],
+        "invested_total": data["invested_total"],
+        "cash_total": data["cash_total"],
+        "by_type": data["by_type"],
+        "accounts": [{"name": a["name"], "total": a["total"]} for a in data["accounts"]],
+        "top_holdings": [{"ticker": t["ticker"], "value": t["value"],
+                          "pct_of_total": t["pct_of_total"]} for t in data["top_holdings"]],
+    }
+
+
 _AI_TOOL_FNS = {
     "list_accounts":          _tool_list_accounts,
     "get_flow_summary":       _tool_flow_summary,
@@ -4876,6 +5059,7 @@ _AI_TOOL_FNS = {
     "get_top_merchants":      _tool_top_merchants,
     "get_budget_status":      _tool_budget_status,
     "get_savings_goal":       _tool_savings_goal,
+    "get_holdings":           _tool_holdings,
 }
 
 _AI_TOOLS = [
@@ -4928,6 +5112,16 @@ _AI_TOOLS = [
                        "amount, required monthly contribution, and on-track status.",
         "parameters": {"type": "object", "properties": {}},
     }},
+    {"type": "function", "function": {
+        "name": "get_holdings",
+        "description": "Investment holdings. With no account: portfolio totals, cash vs invested, "
+                       "allocation by asset type, per-account totals, and top concentrations. "
+                       "With an account name: that account's individual positions (ticker, value, %).",
+        "parameters": {"type": "object", "properties": {
+            "account": {"type": "string", "description": "Optional investment account name, "
+                        "e.g. 'brokerage', 'Roth', 'Schwab Individual'; omit for the whole portfolio"},
+        }},
+    }},
 ]
 
 
@@ -4963,9 +5157,9 @@ _AI_TOOLS_HINT = (
     "\n\nYou also have TOOLS to fetch specifics beyond the summary: list_accounts, "
     "get_flow_summary, get_account_cashflow(account, month), "
     "get_spending_by_category(range, account?), get_top_merchants(range, account?), "
-    "get_budget_status(month?), get_savings_goal(). "
+    "get_budget_status(month?), get_savings_goal(), get_holdings(account?). "
     "Call a tool whenever the question needs a specific month, account, category, "
-    "merchant, budget, or goal detail not in the summary. Refer to accounts by name "
+    "merchant, budget, goal, or investment-holding detail not in the summary. Refer to accounts by name "
     "(e.g. 'Amex', 'Fifth Third checking'). After getting tool results, answer "
     "concisely with the real figures. Never invent numbers — use a tool or say it's "
     "not available."

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Holdings</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #222; }
+
+    .topbar { background: #1a1a2e; color: #eee; padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+    .topbar h1 { margin: 0; font-size: 1.1rem; color: #fff; }
+    .topbar a { color: #aad4f5; font-size: .9rem; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+    .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 1rem; }
+    .updated { font-size: .78rem; color: #9fb3c8; }
+
+    .page { padding: 1.25rem 1.5rem 3rem; max-width: 1150px; }
+    .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08);
+      padding: 1.1rem 1.4rem; margin-bottom: 1.4rem; }
+    .card h2 { margin: 0 0 .9rem; font-size: 1rem; color: #1a1a2e; }
+
+    .btn { padding: .42rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: .9rem; }
+    .btn-primary { background: #0078d7; color: #fff; }
+    .btn-primary:hover { background: #005fa3; }
+    .btn-primary:disabled { background: #88a; cursor: default; }
+
+    /* Summary tiles */
+    .tiles { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .tile { flex: 1 1 180px; background: #fff; border: 1px solid #e6e9ee; border-radius: 10px;
+      padding: .9rem 1.1rem; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+    .tile .t-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+    .tile .t-val { font-size: 1.45rem; font-weight: 700; color: #1a1a2e; margin-top: .25rem; }
+    .tile .t-sub { font-size: .76rem; color: #999; margin-top: .15rem; }
+
+    /* Allocation bar */
+    .alloc { display: flex; height: 22px; border-radius: 6px; overflow: hidden; margin: .4rem 0 .8rem; }
+    .alloc span { display: block; }
+    .legend { display: flex; flex-wrap: wrap; gap: .8rem; font-size: .82rem; color: #444; }
+    .legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: .35rem; vertical-align: baseline; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { padding: .42rem .6rem; text-align: right; border-bottom: 1px solid #eef0f3; }
+    th:first-child, td:first-child { text-align: left; }
+    th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #888; font-weight: 600; }
+    tbody tr:hover { background: #fafbfc; }
+    .ticker { font-weight: 700; color: #1a1a2e; }
+    .secname { color: #888; font-size: .8rem; }
+    .cashrow td { color: #2a7d5f; }
+    .pos { color: #1a8a4a; } .neg { color: #c0392b; }
+    .pill { font-size: .68rem; padding: .08rem .45rem; border-radius: 999px; background: #eef; color: #556; text-transform: capitalize; }
+
+    .acct-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+    .acct-head .a-name { font-size: 1rem; font-weight: 700; color: #1a1a2e; }
+    .acct-head .a-inst { font-size: .8rem; color: #999; }
+    .acct-head .a-tot { margin-left: auto; font-size: 1.1rem; font-weight: 700; color: #1a1a2e; }
+
+    .empty { text-align: center; color: #999; padding: 2.5rem 1rem; }
+    .empty h2 { color: #555; }
+    .msg { font-size: .85rem; margin-left: 1rem; }
+    .msg.ok { color: #1a8a4a; } .msg.err { color: #c0392b; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>📈 Holdings</h1>
+  <a href="/reports">← Reports</a>
+  <a href="/reports/reconcile">Accounts</a>
+  <a href="/reports/monthly">Monthly Cashflow</a>
+  <a href="/reports/ai">Local AI</a>
+  <div class="right">
+    <span class="updated" id="updated"></span>
+    <button class="btn btn-primary" id="refresh-btn" onclick="refresh()">↻ Refresh from Plaid</button>
+    <span class="msg" id="msg"></span>
+  </div>
+</div>
+
+<div class="page">
+  <div id="content"><div class="empty">Loading…</div></div>
+</div>
+
+<script>
+const PALETTE = ['#4e79a7','#59a14f','#f28e2b','#e15759','#76b7b2','#edc948','#b07aa1','#9c755f','#bab0ac'];
+
+function fmt(n) {
+  if (n === null || n === undefined) return '—';
+  return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtQty(n) { return Number(n).toLocaleString('en-US', {maximumFractionDigits:4}); }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function load() {
+  try {
+    const d = await fetch('/reports/api/holdings').then(r => r.json());
+    render(d);
+  } catch (e) {
+    document.getElementById('content').innerHTML =
+      '<div class="empty"><h2>Could not load holdings</h2><p>'+esc(e.message)+'</p></div>';
+  }
+}
+
+function render(d) {
+  document.getElementById('updated').textContent =
+    d.updated_at ? ('as of ' + d.updated_at.slice(0,16).replace('T',' ')) : '';
+
+  if (!d.accounts || !d.accounts.length) {
+    document.getElementById('content').innerHTML =
+      `<div class="empty"><div style="font-size:2rem">📈</div>
+        <h2>No holdings stored yet</h2>
+        <p>Click <strong>Refresh from Plaid</strong> to pull your investment positions.</p></div>`;
+    return;
+  }
+
+  const colorFor = {};
+  Object.keys(d.by_type).forEach((k,i) => colorFor[k] = PALETTE[i % PALETTE.length]);
+
+  // Summary tiles
+  let html = `<div class="tiles">
+    <div class="tile"><div class="t-label">Total Portfolio</div><div class="t-val">${fmt(d.grand_total)}</div></div>
+    <div class="tile"><div class="t-label">Invested</div><div class="t-val">${fmt(d.invested_total)}</div>
+      <div class="t-sub">${d.grand_total ? (100*d.invested_total/d.grand_total).toFixed(0):0}% of portfolio</div></div>
+    <div class="tile"><div class="t-label">Cash &amp; Money Market</div><div class="t-val">${fmt(d.cash_total)}</div>
+      <div class="t-sub">${d.grand_total ? (100*d.cash_total/d.grand_total).toFixed(0):0}% of portfolio</div></div>
+    <div class="tile"><div class="t-label">Accounts</div><div class="t-val">${d.accounts.length}</div></div>
+  </div>`;
+
+  // Allocation
+  const gt = d.grand_total || 1;
+  let bar = '', legend = '';
+  for (const [k,v] of Object.entries(d.by_type)) {
+    const pct = 100*v/gt;
+    bar += `<span style="width:${pct}%;background:${colorFor[k]}" title="${esc(k)} ${fmt(v)}"></span>`;
+    legend += `<span><span class="sw" style="background:${colorFor[k]}"></span>${esc(k)} — ${fmt(v)} (${pct.toFixed(0)}%)</span>`;
+  }
+  html += `<div class="card"><h2>Asset Allocation</h2><div class="alloc">${bar}</div><div class="legend">${legend}</div></div>`;
+
+  // Top concentrations
+  if (d.top_holdings && d.top_holdings.length) {
+    let rows = d.top_holdings.map(t => `<tr>
+      <td><span class="ticker">${esc(t.ticker)}</span> <span class="secname">${esc(t.name)}</span></td>
+      <td>${esc(t.account)}</td><td>${fmt(t.value)}</td><td>${t.pct_of_total}%</td></tr>`).join('');
+    html += `<div class="card"><h2>Top Holdings</h2>
+      <table><thead><tr><th>Security</th><th>Account</th><th>Value</th><th>% of Portfolio</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+
+  // Per-account drill-down
+  for (const a of d.accounts) {
+    let rows = a.positions.map(p => `<tr class="${p.is_cash?'cashrow':''}">
+      <td><span class="ticker">${esc(p.ticker)}</span> <span class="secname">${esc(p.name)}</span>
+          ${p.is_cash?'':`<span class="pill">${esc(p.type)}</span>`}</td>
+      <td>${p.is_cash?'':fmtQty(p.quantity)}</td>
+      <td>${p.is_cash?'':fmt(p.price)}</td>
+      <td>${fmt(p.value)}</td>
+      <td>${p.pct_of_account}%</td>
+      <td>${p.gain===null||p.gain===undefined?'—':`<span class="${p.gain>=0?'pos':'neg'}">${p.gain>=0?'+':''}${fmt(p.gain).slice(1)}</span>`}</td>
+    </tr>`).join('');
+    html += `<div class="card">
+      <div class="acct-head">
+        <span class="a-name">${esc(a.name)}</span>
+        <span class="a-inst">${esc(a.institution)} · ${esc(a.subtype||'')}</span>
+        <span class="a-tot">${fmt(a.total)}</span>
+      </div>
+      <table style="margin-top:.7rem">
+        <thead><tr><th>Security</th><th>Qty</th><th>Price</th><th>Value</th><th>% Acct</th><th>Gain/Loss</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+    </div>`;
+  }
+
+  document.getElementById('content').innerHTML = html;
+}
+
+async function refresh() {
+  const btn = document.getElementById('refresh-btn'), msg = document.getElementById('msg');
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Refreshing…';
+  msg.textContent = ''; msg.className = 'msg';
+  try {
+    const r = await fetch('/investments/holdings');
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || ('HTTP '+r.status));
+    const n = j.updated || 0;
+    msg.textContent = `✓ Updated ${n} investment item(s).`; msg.className = 'msg ok';
+    await load();
+  } catch (e) {
+    msg.textContent = '⚠️ ' + e.message; msg.className = 'msg err';
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+load();
+</script>
+</body>
+</html>

@@ -431,6 +431,119 @@ def upsert_recurring_raw(item_id: str, payload: dict) -> None:
         )
         conn.commit()
 
+_CASH_SEC_TYPES = {"cash", "money market", "money market fund"}
+# Name fragments that mark a money-market / sweep fund (Plaid often types these
+# as plain "mutual fund"). Covers abbreviations like "Money Fd" and "Money Mkt".
+_CASH_NAME_HINTS = (
+    "money market", "money mkt", "money fund", "money fd",
+    "cash reserves", "cash management", "govt money", "government money",
+)
+
+
+def _is_cash_equiv(sec: dict) -> int:
+    """Treat cash and money-market sweep funds as cash equivalents."""
+    typ = (sec.get("type") or "").strip().lower()
+    name = (sec.get("name") or "").lower()
+    if typ in _CASH_SEC_TYPES:
+        return 1
+    if any(h in name for h in _CASH_NAME_HINTS):
+        return 1
+    return 0
+
+
+def upsert_investment_holdings(item_id: str, payload: dict) -> None:
+    """
+    Persist a /investments/holdings/get payload:
+      - raw payload (overwrite per item)
+      - securities reference (upsert, global)
+      - holdings (replace all rows for the accounts in this payload)
+      - holdings_snapshots (append per-account total value for trend history)
+    """
+    accounts   = payload.get("accounts") or []
+    securities = payload.get("securities") or []
+    holdings   = payload.get("holdings") or []
+    acct_ids   = [a.get("account_id") for a in accounts if a.get("account_id")]
+
+    with _db_connect() as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+
+        # Raw snapshot
+        conn.execute(
+            """
+            INSERT INTO investment_holdings_raw (item_id, payload_json, captured_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(item_id) DO UPDATE SET
+              payload_json=excluded.payload_json,
+              captured_at=CURRENT_TIMESTAMP
+            """,
+            (item_id, json.dumps(payload, default=str)),
+        )
+
+        # Securities reference
+        for s in securities:
+            conn.execute(
+                """
+                INSERT INTO securities
+                  (security_id, ticker_symbol, name, type, close_price,
+                   close_price_date, iso_currency, is_cash_equiv, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(security_id) DO UPDATE SET
+                  ticker_symbol=excluded.ticker_symbol, name=excluded.name,
+                  type=excluded.type, close_price=excluded.close_price,
+                  close_price_date=excluded.close_price_date,
+                  iso_currency=excluded.iso_currency,
+                  is_cash_equiv=excluded.is_cash_equiv, updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    s.get("security_id"), s.get("ticker_symbol"), s.get("name"),
+                    s.get("type"), s.get("close_price"), s.get("close_price_date"),
+                    s.get("iso_currency_code") or s.get("unofficial_currency_code"),
+                    _is_cash_equiv(s),
+                ),
+            )
+
+        # Replace holdings for the accounts present in this payload
+        if acct_ids:
+            qmarks = ",".join("?" for _ in acct_ids)
+            conn.execute(f"DELETE FROM holdings WHERE account_id IN ({qmarks})", acct_ids)
+        for h in holdings:
+            conn.execute(
+                """
+                INSERT INTO holdings
+                  (account_id, security_id, quantity, institution_price,
+                   institution_value, cost_basis, iso_currency, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(account_id, security_id) DO UPDATE SET
+                  quantity=excluded.quantity,
+                  institution_price=excluded.institution_price,
+                  institution_value=excluded.institution_value,
+                  cost_basis=excluded.cost_basis,
+                  iso_currency=excluded.iso_currency, updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    h.get("account_id"), h.get("security_id"), h.get("quantity"),
+                    h.get("institution_price"), h.get("institution_value"),
+                    h.get("cost_basis"),
+                    h.get("iso_currency_code") or h.get("unofficial_currency_code"),
+                ),
+            )
+
+        # Append per-account total-value snapshot for trend history
+        totals: dict[str, float] = {}
+        for h in holdings:
+            aid = h.get("account_id")
+            if aid:
+                totals[aid] = totals.get(aid, 0.0) + float(h.get("institution_value") or 0.0)
+        for aid, tot in totals.items():
+            conn.execute(
+                "INSERT INTO holdings_snapshots (account_id, total_value, captured_at) "
+                "VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (aid, round(tot, 2)),
+            )
+
+        conn.commit()
+
+
 # -----------------------------
 # Transaction classification rules
 # -----------------------------
