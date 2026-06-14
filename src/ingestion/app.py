@@ -412,13 +412,22 @@ def link_token_update():
         if not item:
             return jsonify({"error": f"Unknown item_id: {item_id}"}), 404
 
+        # Only request liabilities consent for items that actually hold a credit
+        # account. Requesting a product the institution doesn't support (e.g.
+        # 'investments' on the Amazon store card, or 'liabilities' on a
+        # Schwab investment item) fails link_token_create with INVALID_FIELD
+        # before the user can log in. Granting liabilities consent here is what
+        # lets /liabilities later fetch statement balance + due dates (otherwise
+        # it returns ADDITIONAL_CONSENT_REQUIRED).
+        try:
+            accts = get_accounts_canonical(item_id=item_id)
+        except Exception:
+            accts = []
+        has_credit = any((a.get("type") or "").lower() == "credit" for a in accts)
+
         webhook = os.getenv("PLAID_WEBHOOK_URL")
-        req = LinkTokenCreateRequest(
+        kwargs = dict(
             products=[Products("transactions")],
-            additional_consented_products=[
-                Products("liabilities"),
-                Products("investments"),
-            ],
             client_name="Personal Finance App",
             country_codes=[CountryCode("US")],
             language="en",
@@ -426,6 +435,9 @@ def link_token_update():
             access_token=item["access_token"],  # UPDATE MODE
             webhook=webhook,
         )
+        if has_credit:
+            kwargs["additional_consented_products"] = [Products("liabilities")]
+        req = LinkTokenCreateRequest(**kwargs)
         res = client.link_token_create(req)
         return jsonify(res.to_dict())
     except Exception as e:
@@ -635,17 +647,30 @@ def liabilities_get():
             item_id = item["item_id"]
             access_token = item["access_token"]
 
-            req = LiabilitiesGetRequest(access_token=access_token)
-            res = client.liabilities_get(req).to_dict()
-            capture_plaid_raw("liabilities/get", item_id, res)
+            # Per-item: liabilities is only supported on some products (credit /
+            # student loans / mortgage). Depository and investment items raise
+            # PRODUCTS_NOT_SUPPORTED, and a stale item raises ITEM_LOGIN_REQUIRED.
+            # Isolate failures so one bad item doesn't abort the whole refresh.
+            try:
+                req = LiabilitiesGetRequest(access_token=access_token)
+                res = client.liabilities_get(req).to_dict()
+                capture_plaid_raw("liabilities/get", item_id, res)
+                upsert_liabilities_raw(item_id, res)
+                out.append({"item_id": item_id, "ok": True})
+            except Exception as item_err:
+                msg = str(item_err)
+                code = "ERROR"
+                m = re.search(r'"error_code":\s*"([^"]+)"', msg)
+                if m:
+                    code = m.group(1)
+                log_app(f"liabilities skip item_id={item_id}: {code}", "info")
+                out.append({"item_id": item_id, "ok": False, "error_code": code})
 
-            upsert_liabilities_raw(item_id, res)
-            out.append({"item_id": item_id, "ok": True})
-
-        return jsonify({"ok": True, "items": out})
+        ok_n = sum(1 for o in out if o.get("ok"))
+        return jsonify({"ok": True, "updated": ok_n, "items": out})
     except Exception as e:
         log_app(f"Error in /liabilities: {e}", "error")
-        return jsonify({"error": str(e)}), 400   
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/recurring", methods=["GET"])
