@@ -62,6 +62,10 @@
         <option value="12m">Last 12 Months</option>
         <option value="custom">Custom…</option>
       </select>
+      <label for="account">Account:</label>
+      <select id="account" onchange="loadAll()">
+        <option value="">All Accounts</option>
+      </select>
       <span id="custom-dates" style="display:none; align-items:center; gap:.4rem;">
         <input type="date" id="range-start" style="padding:.35rem .5rem; border:1px solid #ccc; border-radius:6px; font-size:.9rem;">
         <span style="color:#666;">to</span>
@@ -125,11 +129,28 @@
 
     function buildRangeQS() {
       const range = $('range').value;
+      let qs;
       if (range === 'custom') {
         const s = $('range-start').value, e = $('range-end').value;
-        return (s && e) ? `start=${s}&end=${e}` : '';
+        qs = (s && e) ? `start=${s}&end=${e}` : '';
+      } else {
+        qs = 'range=' + range;
       }
-      return 'range=' + range;
+      const acct = $('account').value;
+      if (acct && qs) qs += '&account_id=' + encodeURIComponent(acct);
+      return qs;
+    }
+
+    async function loadAccounts() {
+      try {
+        const accts = await fetchJSON('/reports/api/transactions/accounts');
+        const sel = $('account');
+        accts.forEach(a => {
+          const o = document.createElement('option');
+          o.value = a.account_id; o.textContent = a.label;
+          sel.appendChild(o);
+        });
+      } catch {}
     }
 
     function onRangeChange() {
@@ -374,6 +395,7 @@
       $('range-start').value = `${yyyy}-${mm}-01`;
       $('range-end').value   = today.toISOString().slice(0, 10);
 
+      loadAccounts();
       loadAll();
       $('range').addEventListener('change', onRangeChange);
       setInterval(loadAll, REFRESH_MS);
