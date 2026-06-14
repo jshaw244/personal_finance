@@ -31,6 +31,7 @@ from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.liabilities_get_request import LiabilitiesGetRequest
+from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
 from plaid.model.transactions_recurring_get_request import TransactionsRecurringGetRequest
 
 
@@ -61,6 +62,7 @@ from src.storage.db import (
     get_top_merchants,
     get_credit_card_statement_summary,
     upsert_recurring_raw,
+    upsert_investment_holdings,
     get_recurring_raw,
     get_transactions_for_classification,
     upsert_transaction_classification,
@@ -670,6 +672,47 @@ def liabilities_get():
         return jsonify({"ok": True, "updated": ok_n, "items": out})
     except Exception as e:
         log_app(f"Error in /liabilities: {e}", "error")
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/investments/holdings", methods=["GET"])
+@require_plaid
+def investments_holdings_get():
+    try:
+        items = get_all_items()
+        if not items:
+            return jsonify({"error": "No linked items yet"}), 400
+
+        out = []
+        for item in items:
+            item_id = item["item_id"]
+            access_token = item["access_token"]
+
+            # Investments holdings is only supported on brokerage/retirement items.
+            # Depository/credit-only items raise PRODUCTS_NOT_SUPPORTED, and an item
+            # not consented for investments raises ADDITIONAL_CONSENT_REQUIRED.
+            # Isolate failures so one bad item doesn't abort the whole refresh.
+            try:
+                req = InvestmentsHoldingsGetRequest(access_token=access_token)
+                res = client.investments_holdings_get(req).to_dict()
+                capture_plaid_raw("investments/holdings/get", item_id, res)
+                upsert_investment_holdings(item_id, res)
+                out.append({"item_id": item_id, "ok": True,
+                            "accounts": len(res.get("accounts") or []),
+                            "holdings": len(res.get("holdings") or [])})
+            except Exception as item_err:
+                msg = str(item_err)
+                code = "ERROR"
+                m = re.search(r'"error_code":\s*"([^"]+)"', msg)
+                if m:
+                    code = m.group(1)
+                log_app(f"holdings skip item_id={item_id}: {code}", "info")
+                out.append({"item_id": item_id, "ok": False, "error_code": code})
+
+        ok_n = sum(1 for o in out if o.get("ok"))
+        return jsonify({"ok": True, "updated": ok_n, "items": out})
+    except Exception as e:
+        log_app(f"Error in /investments/holdings: {e}", "error")
         return jsonify({"error": str(e)}), 400
 
 

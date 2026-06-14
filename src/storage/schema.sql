@@ -300,6 +300,58 @@ CREATE TABLE IF NOT EXISTS budget_settings (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- ------------------------------------------------------------
+-- Investment holdings (Plaid Investments product)
+-- investment_holdings_raw: full /investments/holdings/get payload per item.
+-- securities: reference data per security_id (latest seen).
+-- holdings: current positions, one row per (account_id, security_id).
+-- holdings_snapshots: append-only per-account total value per fetch (trend).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS investment_holdings_raw (
+  item_id      TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  captured_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (item_id) REFERENCES items(item_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS securities (
+  security_id      TEXT PRIMARY KEY,
+  ticker_symbol    TEXT,
+  name             TEXT,
+  type             TEXT,            -- equity | etf | mutual fund | cash | fixed income | ...
+  close_price      REAL,
+  close_price_date TEXT,
+  iso_currency     TEXT,
+  is_cash_equiv    INTEGER DEFAULT 0,  -- cash / money-market sweep
+  updated_at       TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS holdings (
+  account_id        TEXT NOT NULL,
+  security_id       TEXT NOT NULL,
+  quantity          REAL,
+  institution_price REAL,
+  institution_value REAL,
+  cost_basis        REAL,
+  iso_currency      TEXT,
+  updated_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (account_id, security_id),
+  FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE,
+  FOREIGN KEY (security_id) REFERENCES securities(security_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_holdings_account ON holdings(account_id);
+
+CREATE TABLE IF NOT EXISTS holdings_snapshots (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id  TEXT NOT NULL,
+  total_value REAL NOT NULL,
+  captured_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_holdings_snap_account
+  ON holdings_snapshots(account_id, captured_at);
+
 -- ============================================================
 -- End of schema.sql
 -- ============================================================

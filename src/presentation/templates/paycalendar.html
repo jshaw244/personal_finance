@@ -216,7 +216,8 @@ function escHtml(s) {
 async function loadBalances() {
   try {
     const data = await fetch('/reports/api/account_balances').then(r => r.json());
-    const checking = data.filter(a => a.subtype === 'checking');
+    const checking = data.filter(a => a.subtype === 'checking'
+      && !(a.institution || '').toLowerCase().includes('schwab'));
     const updDates = checking.map(a => a.updated_at).filter(Boolean).sort().reverse();
     if (updDates.length) document.getElementById('bal-updated').textContent = 'as of ' + updDates[0];
     document.getElementById('bal-cards').innerHTML = checking.map(a => {
