@@ -1867,7 +1867,7 @@ def api_account_balances():
                    i.institution_name
             FROM accounts a
             JOIN items i ON i.item_id = a.item_id
-            WHERE a.type IN ('depository', 'credit', 'investment', 'loan')
+            WHERE a.type IN ('depository', 'credit', 'investment')
             ORDER BY a.type DESC, a.subtype, a.name
         """).fetchall()
         stmt_map = _credit_statement_map(conn)
