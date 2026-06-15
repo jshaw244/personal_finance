@@ -28,6 +28,8 @@ pandoc-3.8.2-windows-x86_64.msi
 # Environment and credentials
 .env*
 config/env/.env*
+# ...but DO commit the example template
+!config/env/.env.example
 
 # Plaid raw ingestion
 data/raw/
