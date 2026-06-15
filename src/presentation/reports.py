@@ -45,6 +45,15 @@ login_manager.login_view = "reports.login"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = PROJECT_ROOT / "results"
 DB_PATH = DB_FILE
+_CFG_DIR = PROJECT_ROOT / "config"
+
+
+def _schedules_path():
+    """Path to the personal schedules.json (paydays/bills/transfers).
+    Falls back to the committed schedules.example.json so a fresh clone runs
+    without a private config present."""
+    p = _CFG_DIR / "schedules.json"
+    return p if p.exists() else _CFG_DIR / "schedules.example.json"
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True, parents=True)
 MAINT_LOG = LOG_DIR / "maintenance.log"
@@ -1129,7 +1138,7 @@ def api_calendar_events():
     month_start = date(year, mon, 1)
     month_end   = date(year, mon, days_in_month)
 
-    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+    sched_path = _schedules_path()
     with open(sched_path, encoding="utf-8") as f:
         sched = json.load(f)
 
@@ -1474,6 +1483,17 @@ def api_calendar_events():
             )
             out_params = tuple(f"%{kw}%" for kw in all_out_kws)
 
+            # Exclude configured income payers (counted as income elsewhere) — names
+            # come from schedules.json income[].tx_match, never hardcoded here.
+            income_kws = [
+                i["tx_match"].lower()
+                for i in sched.get("income", []) if i.get("tx_match")
+            ]
+            income_excl = " ".join(
+                "AND LOWER(t.name) NOT LIKE ?" for _ in income_kws
+            )
+            income_params = tuple(f"%{kw}%" for kw in income_kws)
+
             misc_rows = conn.execute(f"""
                 SELECT t.date, t.name, t.amount
                 FROM transactions t
@@ -1483,10 +1503,10 @@ def api_calendar_events():
                   AND t.date >= ? AND t.date <= ?
                   AND IFNULL(t.pending, 0) = 0
                   AND LOWER(t.name) NOT LIKE '%employer payroll%'
-                  AND LOWER(t.name) NOT LIKE '%rent payment%'
+                  {income_excl}
                   {out_excl}
                 ORDER BY t.date ASC
-            """, (month_start.isoformat(), month_end.isoformat()) + out_params).fetchall()
+            """, (month_start.isoformat(), month_end.isoformat()) + income_params + out_params).fetchall()
         finally:
             conn.close()
 
@@ -1615,7 +1635,7 @@ def api_pay_calendar():
     month_start = date(yr, mn, 1)
     month_end   = date(yr, mn, days_in_month)
 
-    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+    sched_path = _schedules_path()
     with open(sched_path, encoding="utf-8") as f:
         sched = json.load(f)
 
@@ -1810,7 +1830,7 @@ def _schedule_due_map(conn) -> dict:
     import calendar as _cal
     out: dict = {}
     try:
-        with open(PROJECT_ROOT / "config" / "schedules.json", encoding="utf-8") as f:
+        with open(_schedules_path(), encoding="utf-8") as f:
             sched = json.load(f)
     except Exception:
         return out
@@ -2022,7 +2042,7 @@ def api_monthly_cashflow():
     month_start = date(yr, mn, 1)
     month_end   = date(yr, mn, days)
 
-    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+    sched_path = _schedules_path()
     with open(sched_path, encoding="utf-8") as f:
         sched = json.load(f)
 
@@ -2030,6 +2050,11 @@ def api_monthly_cashflow():
     bill_patterns = {
         b["tx_match"].lower(): b["name"]
         for b in sched.get("bills", []) if b.get("tx_match")
+    }
+    # Income tx_match pattern → display name (from config, not hardcoded)
+    income_patterns = {
+        i["tx_match"].upper(): i["name"]
+        for i in sched.get("income", []) if i.get("tx_match")
     }
     # Known scheduled transfer outgoing patterns
     XFER_PATTERNS = {
@@ -2049,8 +2074,9 @@ def api_monthly_cashflow():
             if "EMPLOYER" in n:
                 return "payroll", "Employer Payroll"
             if "RECEIVED ZELLE PMT" in n:
-                if "RENT PAYMENT" in n:
-                    return "income_other", "House Holdings"
+                for pat, lbl in income_patterns.items():
+                    if pat in n:
+                        return "income_other", lbl
                 who = name.split(" FROM ")[-1].strip().title() if " FROM " in n else "Zelle"
                 return "income_other", f"Zelle ← {who}"
             if "5/3 ONLINE TRANSFER FROM" in n:
@@ -2166,7 +2192,7 @@ def api_schedule_amounts():
             Monthly override takes priority over global amount_override.
        POST: save overrides into monthly_overrides[month] in schedules.json."""
     from src.common.paths import PROJECT_ROOT
-    sched_path = PROJECT_ROOT / "config" / "schedules.json"
+    sched_path = _schedules_path()
 
     with open(sched_path, encoding="utf-8") as f:
         sched = json.load(f)

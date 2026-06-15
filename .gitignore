@@ -60,3 +60,17 @@ src/presentation/templates/reports_index_*.html
 
 # Uploaded bank statements (personal financial documents)
 statements/
+
+# Personal schedule config (paydays/bills/income). Ship schedules.example.json instead.
+config/schedules.json
+
+# Exported data dumps (real financial data)
+data/*.csv
+
+# IDE / editor state
+.vs/
+*.vsidx
+
+# Generated folder-structure dumps
+Latest_Folder_Structure.txt
+project_tree.txt

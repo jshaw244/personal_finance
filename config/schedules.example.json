@@ -1,0 +1,87 @@
+{
+  "_comment": "Example schedule config. Copy to schedules.json and fill in your own paydays, bills, income, and transfers. schedules.json is gitignored (personal financial data).",
+  "payday": {
+    "cadence_days": 14,
+    "anchor_date": "2026-01-02"
+  },
+  "income": [
+    {
+      "name": "Rental Income",
+      "day": 15,
+      "amount_override": 650.0,
+      "tx_match": "rent payment"
+    }
+  ],
+  "bills": [
+    {
+      "name": "Primary Credit Card",
+      "day": 5,
+      "auto_pay": true,
+      "plaid_match": "example bank",
+      "tx_match": "example bank web pay"
+    },
+    {
+      "name": "Water/Village",
+      "day": 12,
+      "auto_pay": true,
+      "tx_match": "city water",
+      "cadence_months": 2,
+      "anchor_date": "2026-01-12"
+    },
+    {
+      "name": "Rewards Card",
+      "day": 13,
+      "auto_pay": true,
+      "plaid_match": "rewards card",
+      "tx_match": "rewards epayment",
+      "amount_override": 200.0
+    },
+    {
+      "name": "Electric",
+      "day": 20,
+      "auto_pay": true,
+      "tx_match": "electric co",
+      "amount_override": 120.0
+    },
+    {
+      "name": "Mortgage Transfer",
+      "day": 23,
+      "auto_pay": true,
+      "tx_match": "mortgage",
+      "amount_override": 380.0
+    },
+    {
+      "name": "Gas",
+      "day": 28,
+      "auto_pay": true,
+      "tx_match": "gas co",
+      "amount_override": 100.0
+    },
+    {
+      "name": "Cell Phone",
+      "day": 31,
+      "auto_pay": true,
+      "tx_match": "wireless payment",
+      "amount_override": 40.0
+    }
+  ],
+  "transfers": [
+    {
+      "name": "Savings Transfer",
+      "amount_override": 100.0
+    },
+    {
+      "name": "Brokerage Transfer",
+      "amount_override": 100.0
+    },
+    {
+      "name": "Retirement (IRA)",
+      "amount_override": 300.0
+    },
+    {
+      "name": "High-Yield Savings",
+      "amount_override": 900.0
+    }
+  ],
+  "monthly_overrides": {}
+}
