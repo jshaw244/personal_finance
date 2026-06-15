@@ -4,6 +4,10 @@
     "cadence_days": 14,
     "anchor_date": "2026-01-02"
   },
+  "payroll": {
+    "tx_match": "payroll",
+    "label": "Payroll"
+  },
   "income": [
     {
       "name": "Rental Income",

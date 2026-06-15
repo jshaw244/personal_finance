@@ -54,6 +54,15 @@ def _schedules_path():
     without a private config present."""
     p = _CFG_DIR / "schedules.json"
     return p if p.exists() else _CFG_DIR / "schedules.example.json"
+
+
+def _payroll_match(sched):
+    """(tx_match_lower, label) for payroll deposits, from schedules.json payroll{}.
+    Defaults keep the public repo generic when no payroll config is present."""
+    p = (sched or {}).get("payroll") or {}
+    return (p.get("tx_match") or "payroll").lower(), (p.get("label") or "Payroll")
+
+
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True, parents=True)
 MAINT_LOG = LOG_DIR / "maintenance.log"
@@ -205,7 +214,7 @@ CATEGORY_KEYWORDS = {
     "Groceries": ["walmart", "kroger", "aldi", "costco", "whole foods", "target", "jewel", "caputo"],
     "Dining": ["restaurant", "grill", "bar", "cafe", "pizza", "coffee", "burger", "7-11"],
     "Gas": ["shell", "bp", "exxon", "mobil", "marathon", "trip"],
-    "Utilities": ["comcast", "att", "verizon", "village", "village", "nicor", "comed", "duke energy", "electric", "gas bill"],
+    "Utilities": ["comcast", "att", "verizon", "village", "nicor", "comed", "duke energy", "electric", "gas bill"],
     "Entertainment": ["netflix", "spotify", "amc", "theater", "cinema", "disney"],
     "Travel": ["airlines", "hotel", "uber", "lyft", "delta", "southwest"],
     "Shopping": ["amazon", "best buy", "ebay", "target"],
@@ -1445,7 +1454,7 @@ def api_calendar_events():
         if "WEB INITIATED PAYMENT AT " in n:
             after = n.split("WEB INITIATED PAYMENT AT ")[1]
             _stop = {"CK", "SV", "WEBXFR", "PURCHASE", "TRANSFER", "PAYMENT",
-                     "BILLPAY", "VILLAGE", "GAS", "BANK"}
+                     "BILLPAY", "GAS", "BANK"}
             parts = []
             for word in after.split():
                 if word in _stop or re.match(r'^[A-Z0-9]{8,}$', word):
@@ -1493,6 +1502,7 @@ def api_calendar_events():
                 "AND LOWER(t.name) NOT LIKE ?" for _ in income_kws
             )
             income_params = tuple(f"%{kw}%" for kw in income_kws)
+            pr_match, _ = _payroll_match(sched)
 
             misc_rows = conn.execute(f"""
                 SELECT t.date, t.name, t.amount
@@ -1502,11 +1512,11 @@ def api_calendar_events():
                   AND t.amount != 0
                   AND t.date >= ? AND t.date <= ?
                   AND IFNULL(t.pending, 0) = 0
-                  AND LOWER(t.name) NOT LIKE '%employer payroll%'
+                  AND LOWER(t.name) NOT LIKE ?
                   {income_excl}
                   {out_excl}
                 ORDER BY t.date ASC
-            """, (month_start.isoformat(), month_end.isoformat()) + income_params + out_params).fetchall()
+            """, (month_start.isoformat(), month_end.isoformat(), f"%{pr_match}%") + income_params + out_params).fetchall()
         finally:
             conn.close()
 
@@ -1640,6 +1650,7 @@ def api_pay_calendar():
         sched = json.load(f)
 
     payday_cfg = sched.get("payday", {})
+    payroll_match, _ = _payroll_match(sched)
     periods = _calc_pay_periods(
         yr, mn,
         payday_cfg.get("anchor_date", ""),
@@ -1668,7 +1679,7 @@ def api_pay_calendar():
 
     cash_days = {}   # date -> {out, in, txs_out, txs_in}
     cc_days   = {}   # date -> {total, txs}
-    # paycheck_by_date: date -> total payroll deposit (Employer, name match)
+    # paycheck_by_date: date -> total payroll deposit (employer name match from config)
     paycheck_by_date: dict[str, float] = {}
 
     try:
@@ -1691,7 +1702,7 @@ def api_pay_calendar():
             nm  = (row["merchant_name"] or row["name"] or "")[:50]
 
             # Track payroll deposits regardless of month boundary
-            if amt < 0 and "EMPLOYER" in (row["name"] or "").upper():
+            if amt < 0 and payroll_match in (row["name"] or "").lower():
                 paycheck_by_date[d] = paycheck_by_date.get(d, 0.0) + abs(amt)
 
             # Only add to cash_days for dates within the actual month
@@ -2056,6 +2067,9 @@ def api_monthly_cashflow():
         i["tx_match"].upper(): i["name"]
         for i in sched.get("income", []) if i.get("tx_match")
     }
+    # Payroll match + label (from config, not hardcoded)
+    payroll_match, payroll_label = _payroll_match(sched)
+    payroll_match = payroll_match.upper()
     # Known scheduled transfer outgoing patterns
     XFER_PATTERNS = {
         "schwab bank transfer":      "Schwab Checking",
@@ -2071,8 +2085,8 @@ def api_monthly_cashflow():
         """Returns (group, label) for one checking transaction."""
         n = name.upper()
         if amount < 0:  # money IN to checking
-            if "EMPLOYER" in n:
-                return "payroll", "Employer Payroll"
+            if payroll_match in n:
+                return "payroll", payroll_label
             if "RECEIVED ZELLE PMT" in n:
                 for pat, lbl in income_patterns.items():
                     if pat in n:
@@ -2101,7 +2115,7 @@ def api_monthly_cashflow():
             return "misc_out", "Zelle → " + name.split(" TO ")[-1].strip().title()
         if "WEB INITIATED PAYMENT AT " in n:
             after = n.split("WEB INITIATED PAYMENT AT ")[1]
-            _stop = {"CK","SV","WEBXFR","PURCHASE","TRANSFER","PAYMENT","BILLPAY","VILLAGE","GAS","BANK"}
+            _stop = {"CK","SV","WEBXFR","PURCHASE","TRANSFER","PAYMENT","BILLPAY","GAS","BANK"}
             parts = [w for w in after.split()
                      if w not in _stop and not re.match(r'^[A-Z0-9]{8,}$', w)]
             label = " ".join(parts[:3]).title() if parts else after.split()[0].title()
