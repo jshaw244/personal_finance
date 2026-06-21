@@ -152,17 +152,8 @@
          Taxes, Homeowners Insurance — and they roll up together. The ✕ removes a category from the budget
          (transactions keep their label). Savings target auto-includes your active goal's required monthly amount.</p>
       <datalist id="grouplist"></datalist>
-    </div>
-
-    <!-- Manage categories (rename / remove across all transactions) -->
-    <div class="panel">
-      <h2>Manage categories
-        <span class="small" style="font-weight:400">— rename or remove a category everywhere (transactions, rules &amp; budget)</span>
-      </h2>
-      <p class="small">This is different from the ✕ above (which only drops a budget line). Renaming or removing
-         here <strong>retags the underlying transactions</strong> — use it to clean up old or Plaid categories
-         (e.g. merge "Coffee &amp; Tea" into "Food &amp; Drink", or remove ones you don't use).</p>
-      <div id="cat-manager"><div class="small">Loading…</div></div>
+      <p class="small" style="margin-top:.7rem">To <strong>rename or remove</strong> a category entirely (not just from this
+         budget), use <a href="/reports/transactions">Transactions → Manage Categories</a>.</p>
     </div>
 
     <script>
@@ -349,56 +340,6 @@
       }catch(e){ $('save-status').textContent='Error: '+e.message; }
     }
 
-    async function loadCatManager(){
-      const el = $('cat-manager');
-      try {
-        const cats = await fetchJSON('/reports/api/categories');
-        if(!cats.length){ el.innerHTML='<div class="small">No categories yet.</div>'; return; }
-        el.innerHTML = `<table><thead><tr>
-            <th>Category</th><th class="num">Transactions</th><th>In budget</th><th></th>
-          </tr></thead><tbody>${cats.map(c=>`<tr>
-            <td>${esc(c.category)}</td>
-            <td class="num">${c.count}</td>
-            <td>${c.in_budget?'✓':''}</td>
-            <td style="text-align:right;white-space:nowrap">
-              <button class="btn-sm" data-act="rename" data-cat="${esc(c.category)}">✏ Rename</button>
-              <button class="btn-sm rm" data-act="remove" data-cat="${esc(c.category)}" data-n="${c.count}">🗑 Remove</button>
-            </td></tr>`).join('')}</tbody></table>`;
-        el.querySelectorAll('button[data-act]').forEach(b=>b.addEventListener('click', e=>{
-          const cat=e.currentTarget.getAttribute('data-cat');
-          if(e.currentTarget.getAttribute('data-act')==='rename') renameCat(cat);
-          else removeCat(cat, +e.currentTarget.getAttribute('data-n'));
-        }));
-      } catch(e){ el.innerHTML='<div class="small">Could not load categories.</div>'; }
-    }
-
-    async function renameCat(from){
-      const to = prompt(`Rename "${from}" to:\n(If the new name already exists, the two merge into one.)`, from);
-      if(to===null) return;
-      const t=to.trim(); if(!t || t===from) return;
-      try{
-        await fetchJSON('/reports/api/categories/rename', {method:'POST',
-          headers:{'Content-Type':'application/json'}, body:JSON.stringify({from, to:t})});
-        await reloadAll();
-      }catch(e){ alert('Rename failed: '+e.message); }
-    }
-
-    async function removeCat(cat, count){
-      const into = prompt(`Remove "${cat}" (${count} transaction${count===1?'':'s'}).\n\n`+
-        `Move those transactions to which category?\nLeave BLANK to make them uncategorized.`, '');
-      if(into===null) return;
-      const t=into.trim();
-      if(!confirm(`Remove "${cat}"? ${count} transaction${count===1?'':'s'} will `+
-        (t?`move to "${t}"`:'become uncategorized')+`.`)) return;
-      try{
-        await fetchJSON('/reports/api/categories/remove', {method:'POST',
-          headers:{'Content-Type':'application/json'}, body:JSON.stringify({category:cat, into:t})});
-        await reloadAll();
-      }catch(e){ alert('Remove failed: '+e.message); }
-    }
-
-    async function reloadAll(){ await load(); }
-
     async function load(){
       DATA = await fetchJSON('/reports/api/budget_plan');
       $('month-label').textContent = monthName(DATA.month);
@@ -410,7 +351,6 @@
       renderCategories();
       recompute();
       $('expected-income').oninput = recompute;
-      loadCatManager();
     }
     document.addEventListener('DOMContentLoaded', load);
     </script>

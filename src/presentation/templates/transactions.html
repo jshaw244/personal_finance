@@ -204,14 +204,18 @@
 
 <div class="pagination" id="pagination"></div>
 
-<!-- Rules management -->
+<!-- Manage categories -->
 <div class="rules-section">
-  <div class="rules-header" onclick="toggleRules()">
-    <h3>Classification Rules <span id="rules-count" style="font-weight:400;color:#888;font-size:.85rem;"></span></h3>
-    <span class="toggle-icon" id="rules-toggle-icon">▶ Show</span>
+  <div class="rules-header" onclick="toggleCatMgr()">
+    <h3>Manage Categories <span id="catmgr-count" style="font-weight:400;color:#888;font-size:.85rem;"></span></h3>
+    <span class="toggle-icon" id="catmgr-toggle-icon">▶ Show</span>
   </div>
-  <div class="rules-body" id="rules-body">
-    <div id="rules-content"><div class="empty-rules">Loading rules…</div></div>
+  <div class="rules-body" id="catmgr-body">
+    <p style="font-size:.84rem;color:#666;margin:.2rem 0 .7rem;">
+      Rename or remove a category across <strong>all</strong> transactions — use it to clean up old or
+      Plaid categories (merge "Coffee &amp; Tea" into "Food &amp; Drink", or remove ones you don't use).
+      This retags the underlying transactions and updates the budget.</p>
+    <div id="cat-manager"><div class="empty-rules">Loading…</div></div>
   </div>
 </div>
 
@@ -592,7 +596,7 @@ async function saveClassify(txId, category, merchantNorm, createRule, applyExist
       setTimeout(() => loadPage(currentPage), 300);
     }
 
-    if (createRule) loadRules();
+    if (catMgrOpen) loadCatMgr();
   } catch (e) {
     console.error('classify error', e);
   }
@@ -633,52 +637,74 @@ function renderPagination(page, pages, total) {
 }
 
 // ── Rules management ──────────────────────────────────────────────────────
-let rulesOpen = false;
+let catMgrOpen = false;
 
-function toggleRules() {
-  rulesOpen = !rulesOpen;
-  document.getElementById('rules-body').classList.toggle('open', rulesOpen);
-  document.getElementById('rules-toggle-icon').textContent = rulesOpen ? '▼ Hide' : '▶ Show';
-  if (rulesOpen) loadRules();
+function toggleCatMgr() {
+  catMgrOpen = !catMgrOpen;
+  document.getElementById('catmgr-body').classList.toggle('open', catMgrOpen);
+  document.getElementById('catmgr-toggle-icon').textContent = catMgrOpen ? '▼ Hide' : '▶ Show';
+  if (catMgrOpen) loadCatMgr();
 }
 
-async function loadRules() {
-  const rules = await fetch('/reports/api/classification_rules').then(r => r.json()).catch(() => []);
-  document.getElementById('rules-count').textContent = `(${rules.length})`;
+async function loadCatMgr() {
+  const el = document.getElementById('cat-manager');
+  let cats = [];
+  try { cats = await fetch('/reports/api/categories').then(r => r.json()); }
+  catch { el.innerHTML = '<div class="empty-rules">Could not load categories.</div>'; return; }
+  document.getElementById('catmgr-count').textContent = `(${cats.length})`;
+  if (!cats.length) { el.innerHTML = '<div class="empty-rules">No categories yet.</div>'; return; }
 
-  if (!rules.length) {
-    document.getElementById('rules-content').innerHTML =
-      '<div class="empty-rules">No rules yet. Categorize a transaction and choose "Create a rule" to add one.</div>';
-    return;
-  }
+  el.innerHTML = `<table><thead><tr>
+      <th>Category</th><th>Transactions</th><th>In budget</th><th></th>
+    </tr></thead><tbody>${cats.map(c => `<tr>
+      <td><b>${escHtml(c.category)}</b></td>
+      <td>${c.count}</td>
+      <td>${c.in_budget ? '✓' : ''}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-sm" data-act="rename" data-cat="${escHtml(c.category)}">✏ Rename</button>
+        <button class="btn-sm btn-danger" data-act="remove" data-cat="${escHtml(c.category)}" data-n="${c.count}">🗑 Remove</button>
+      </td></tr>`).join('')}</tbody></table>`;
 
-  let html = `<table><thead><tr>
-    <th>Pattern</th><th>Amount</th>
-    <th>Category</th><th>Exclude</th><th>Created</th><th></th>
-  </tr></thead><tbody>`;
-
-  for (const r of rules) {
-    const amtLabel = r.amount_exact != null
-      ? '$' + Number(r.amount_exact).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
-      : '<span style="color:#aaa">any</span>';
-    html += `<tr>
-      <td><b>${escHtml(r.match_value)}</b></td>
-      <td>${amtLabel}</td>
-      <td>${escHtml(r.user_category || '—')}</td>
-      <td>${r.exclude_from_spend ? 'Yes' : 'No'}</td>
-      <td style="font-size:.75rem;color:#aaa">${(r.created_at||'').slice(0,10)}</td>
-      <td><button class="btn-sm btn-danger" onclick="deleteRule(${r.rule_id}, this)">Delete</button></td>
-    </tr>`;
-  }
-  html += '</tbody></table>';
-  document.getElementById('rules-content').innerHTML = html;
+  el.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', e => {
+    const cat = e.currentTarget.getAttribute('data-cat');
+    if (e.currentTarget.getAttribute('data-act') === 'rename') renameCat(cat);
+    else removeCat(cat, +e.currentTarget.getAttribute('data-n'));
+  }));
 }
 
-async function deleteRule(ruleId, btn) {
-  if (!confirm('Delete this rule? Future transactions will no longer be auto-categorized by it.')) return;
-  btn.disabled = true;
-  await fetch(`/reports/api/classification_rules/${ruleId}`, { method: 'DELETE' });
-  loadRules();
+async function refreshAfterCatChange() {
+  if (catMgrOpen) loadCatMgr();
+  loadCategories();
+  loadPage(currentPage);
+}
+
+async function renameCat(from) {
+  const to = prompt(`Rename "${from}" to:\n(If the new name already exists, the two merge into one.)`, from);
+  if (to === null) return;
+  const t = to.trim(); if (!t || t === from) return;
+  try {
+    const r = await fetch('/reports/api/categories/rename', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to: t }) });
+    if (!r.ok) throw new Error(await r.text());
+    refreshAfterCatChange();
+  } catch (e) { alert('Rename failed: ' + e.message); }
+}
+
+async function removeCat(cat, count) {
+  const into = prompt(`Remove "${cat}" (${count} transaction${count === 1 ? '' : 's'}).\n\n` +
+    `Move those transactions to which category?\nLeave BLANK to make them uncategorized.`, '');
+  if (into === null) return;
+  const t = into.trim();
+  if (!confirm(`Remove "${cat}"? ${count} transaction${count === 1 ? '' : 's'} will ` +
+    (t ? `move to "${t}"` : 'become uncategorized') + '.')) return;
+  try {
+    const r = await fetch('/reports/api/categories/remove', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: cat, into: t }) });
+    if (!r.ok) throw new Error(await r.text());
+    refreshAfterCatChange();
+  } catch (e) { alert('Remove failed: ' + e.message); }
 }
 
 // Close modal on backdrop click
@@ -691,9 +717,9 @@ document.getElementById('rule-modal').addEventListener('click', e => {
   populateMonthSelect();
   await Promise.all([loadCategories(), loadAccountList()]);
   loadPage(1);
-  // Pre-load rule count
-  fetch('/reports/api/classification_rules').then(r => r.json()).then(rules => {
-    document.getElementById('rules-count').textContent = `(${rules.length})`;
+  // Pre-load category count
+  fetch('/reports/api/categories').then(r => r.json()).then(cats => {
+    document.getElementById('catmgr-count').textContent = `(${cats.length})`;
   }).catch(() => {});
 })();
 </script>
