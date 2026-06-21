@@ -4716,6 +4716,101 @@ def api_budget_plan():
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Category manager — rename / merge / remove a category across transactions,
+# rules, and the budget plan. This is what actually "removes" a category
+# (vs. the budget ✕, which only drops the budget line).
+# ---------------------------------------------------------------------------
+
+@reports_bp.route("/api/categories")
+@login_required
+def api_categories_list():
+    """Every category in use, with how many transactions carry it and whether
+    it has a budget line."""
+    conn = _goals_connect()
+    try:
+        _ensure_budget_tables(conn)
+        counts = {
+            r["user_category"]: r["n"] for r in conn.execute("""
+                SELECT user_category, COUNT(*) AS n
+                FROM transaction_classifications
+                WHERE user_category IS NOT NULL AND TRIM(user_category) <> ''
+                GROUP BY user_category
+            """).fetchall()
+        }
+        in_budget = {r["category"] for r in conn.execute("SELECT category FROM budget_plan").fetchall()}
+        cats = sorted(set(counts) | in_budget, key=lambda c: c.lower())
+        return jsonify([
+            {"category": c, "count": counts.get(c, 0), "in_budget": c in in_budget}
+            for c in cats
+        ])
+    finally:
+        conn.close()
+
+
+@reports_bp.route("/api/categories/rename", methods=["POST"])
+@login_required
+def api_category_rename():
+    """Rename a category everywhere (transactions + rules + budget). If the new
+    name already exists this becomes a merge. Marked source='user'."""
+    body = request.get_json(silent=True) or {}
+    frm = (body.get("from") or "").strip()
+    to  = (body.get("to") or "").strip()
+    if not frm or not to:
+        return jsonify({"error": "both 'from' and 'to' are required"}), 400
+    if frm == to:
+        return jsonify({"error": "names are identical"}), 400
+    conn = _goals_connect()
+    try:
+        _ensure_budget_tables(conn)
+        n = conn.execute(
+            "UPDATE transaction_classifications SET user_category=?, source='user', "
+            "updated_at=CURRENT_TIMESTAMP WHERE user_category=?",
+            (to, frm),
+        ).rowcount
+        conn.execute("UPDATE classification_rules SET user_category=? WHERE user_category=?", (to, frm))
+        # Budget plan: merge into existing target if present, else just rename the row.
+        if conn.execute("SELECT 1 FROM budget_plan WHERE category=?", (to,)).fetchone():
+            conn.execute("DELETE FROM budget_plan WHERE category=?", (frm,))
+        else:
+            conn.execute("UPDATE budget_plan SET category=? WHERE category=?", (to, frm))
+        conn.commit()
+        return jsonify({"ok": True, "reassigned": n, "merged": frm != to})
+    finally:
+        conn.close()
+
+
+@reports_bp.route("/api/categories/remove", methods=["POST"])
+@login_required
+def api_category_remove():
+    """Remove a category. Its transactions move to `into` (if given) or become
+    uncategorized. Drops the budget line and disables rules that assign it."""
+    body = request.get_json(silent=True) or {}
+    cat  = (body.get("category") or "").strip()
+    into = (body.get("into") or "").strip()
+    if not cat:
+        return jsonify({"error": "category required"}), 400
+    conn = _goals_connect()
+    try:
+        _ensure_budget_tables(conn)
+        if into:
+            n = conn.execute(
+                "UPDATE transaction_classifications SET user_category=?, source='user', "
+                "updated_at=CURRENT_TIMESTAMP WHERE user_category=?", (into, cat),
+            ).rowcount
+        else:
+            n = conn.execute(
+                "UPDATE transaction_classifications SET user_category=NULL, "
+                "updated_at=CURRENT_TIMESTAMP WHERE user_category=?", (cat,),
+            ).rowcount
+        conn.execute("DELETE FROM budget_plan WHERE category=?", (cat,))
+        conn.execute("UPDATE classification_rules SET enabled=0 WHERE user_category=?", (cat,))
+        conn.commit()
+        return jsonify({"ok": True, "affected": n, "into": into or None})
+    finally:
+        conn.close()
+
+
 # ===================================================================
 # Local AI assistant (Ollama) — finance-aware, summary context, fully local
 # ===================================================================
