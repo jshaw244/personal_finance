@@ -4700,9 +4700,11 @@ _AI_SYSTEM_PROMPT = (
 
 
 def _flow_totals_summary(conn) -> dict:
-    """Compact overall flow-type net totals (mirrors /api/flow_type/report)."""
+    """Compact overall flow-type net totals (mirrors /api/flow_type/report), plus
+    the date span the totals cover and per-month averages so callers can answer
+    pace questions like 'how much do I save per month on average'."""
     rows = conn.execute("""
-        SELECT t.amount, t.name AS tx_name, a.type AS acct_type, a.subtype,
+        SELECT t.amount, t.date, t.name AS tx_name, a.type AS acct_type, a.subtype,
                tc.user_category, tc.exclude_reason, tm.payload_json
         FROM transactions t
         JOIN accounts a ON a.account_id = t.account_id
@@ -4711,6 +4713,7 @@ def _flow_totals_summary(conn) -> dict:
         WHERE IFNULL(t.pending, 0) = 0
     """).fetchall()
     tot = {ft: 0.0 for ft in _FLOW_TYPES}
+    dmin = dmax = None
     for r in rows:
         pfcd = ""
         if r["payload_json"]:
@@ -4722,8 +4725,29 @@ def _flow_totals_summary(conn) -> dict:
                                 r["user_category"], r["exclude_reason"], pfcd, r["tx_name"])
         amt = float(r["amount"] or 0)
         tot[ft] += amt if ft in ("savings", "investment") else abs(amt)
+        d = r["date"]
+        if d:
+            if dmin is None or d < dmin: dmin = d
+            if dmax is None or d > dmax: dmax = d
     tot["expense_net"] = round(tot["expense"] - tot["refund"], 2)
-    return {k: round(v, 2) for k, v in tot.items()}
+    out = {k: round(v, 2) for k, v in tot.items()}
+
+    months = 1.0
+    if dmin and dmax:
+        try:
+            months = max((date.fromisoformat(dmax) - date.fromisoformat(dmin)).days / 30.44, 1.0)
+        except Exception:
+            months = 1.0
+    out["period_start"] = dmin
+    out["period_end"]   = dmax
+    out["months"]       = round(months, 1)
+    out["per_month"] = {
+        "income":      round(out["income"] / months, 2),
+        "expense_net": round(out["expense_net"] / months, 2),
+        "savings":     round(out["savings"] / months, 2),
+        "investment":  round(out["investment"] / months, 2),
+    }
+    return out
 
 
 def _build_ai_context() -> str:
@@ -4744,10 +4768,15 @@ def _build_ai_context() -> str:
 
         try:
             f = _flow_totals_summary(conn)
-            lines.append("\nFLOW TOTALS (all history, net):")
+            pm = f.get("per_month", {})
+            lines.append(f"\nFLOW TOTALS ({f.get('period_start','?')} to {f.get('period_end','?')}, "
+                         f"~{f.get('months','?')} months, net):")
             lines.append(f"  income ${f['income']:,.0f}; true expense ${f['expense_net']:,.0f}; "
                          f"net savings ${f['savings']:,.0f}; net investment ${f['investment']:,.0f} "
                          f"(negative = intentional brokerage drawdown for car)")
+            lines.append(f"  per-month averages: income ${pm.get('income',0):,.0f}; "
+                         f"expense ${pm.get('expense_net',0):,.0f}; savings ${pm.get('savings',0):,.0f}; "
+                         f"investment ${pm.get('investment',0):,.0f}")
         except Exception:
             pass
 
@@ -5201,7 +5230,10 @@ _AI_TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "get_flow_summary",
-        "description": "Net flow totals over all history: income, true expense, net savings, net investment.",
+        "description": "Net flow totals over all history: income, true expense, net savings, net "
+                       "investment. Also returns the covered date range (period_start, period_end, "
+                       "months) and per_month averages — use per_month.savings for average monthly "
+                       "savings, etc.",
         "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
