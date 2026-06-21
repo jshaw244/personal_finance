@@ -66,6 +66,7 @@ from src.storage.db import (
     get_recurring_raw,
     get_transactions_for_classification,
     upsert_transaction_classification,
+    set_user_transaction_classification,
     upsert_transaction_classifications_batch,
     get_connection,
     get_spend_canonical,
@@ -1081,8 +1082,9 @@ def classify_transaction(transaction_id: str):
         if not merchant_norm:
             merchant_norm = normalize_merchant(tx.get("merchant_name") or tx.get("name"))
 
-        # 1) Apply manual override
-        upsert_transaction_classification(
+        # 1) Apply manual override — authoritative (fully overwrites + marks
+        #    source='user' so the auto-classifier never reverts it on later syncs).
+        set_user_transaction_classification(
             transaction_id=transaction_id,
             exclude_from_spend=exclude_from_spend,
             exclude_reason=exclude_reason,

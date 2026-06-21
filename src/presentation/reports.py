@@ -4596,13 +4596,21 @@ def api_budget_plan():
                 if tier not in _BUDGET_TIERS:
                     tier = "want"
                 target = float(it.get("target_amount") or 0)
+                group_name = (it.get("group") or it.get("group_name") or "").strip() or None
                 conn.execute(
-                    "INSERT INTO budget_plan (category, tier, target_amount) VALUES (?,?,?) "
+                    "INSERT INTO budget_plan (category, tier, target_amount, group_name) "
+                    "VALUES (?,?,?,?) "
                     "ON CONFLICT(category) DO UPDATE SET "
                     "  tier=excluded.tier, target_amount=excluded.target_amount, "
-                    "  updated_at=CURRENT_TIMESTAMP",
-                    (cat, tier, target),
+                    "  group_name=excluded.group_name, updated_at=CURRENT_TIMESTAMP",
+                    (cat, tier, target, group_name),
                 )
+            # Remove categories from the plan (they stay in transactions; just no
+            # longer carry a budget target / group).
+            for cat in body.get("delete", []):
+                cat = (cat or "").strip()
+                if cat:
+                    conn.execute("DELETE FROM budget_plan WHERE category=?", (cat,))
             conn.commit()
             return jsonify({"status": "ok"})
 
@@ -4613,7 +4621,7 @@ def api_budget_plan():
 
         saved_rows = {
             r["category"]: r for r in
-            conn.execute("SELECT category, tier, target_amount FROM budget_plan").fetchall()
+            conn.execute("SELECT category, tier, target_amount, group_name FROM budget_plan").fetchall()
         }
         expected_income = float(_budget_settings_get(conn, "expected_income", 0) or 0)
 
@@ -4646,7 +4654,25 @@ def api_budget_plan():
                 "actual":   round(actuals.get(cat, 0.0), 2),
                 "ref_avg":  round(ref_avg.get(cat, 0.0), 2),
                 "saved":    bool(saved),
+                "group":    (saved["group_name"] if (saved and saved["group_name"]) else None),
             })
+
+        # Group rollups (within-expenses grouping, e.g. Housing = Mortgage + Taxes + Insurance)
+        groups: dict = {}
+        for c in categories:
+            g = c["group"] or "Ungrouped"
+            gr = groups.setdefault(g, {"group": g, "tier": c["tier"],
+                                       "target": 0.0, "actual": 0.0, "ref_avg": 0.0, "categories": []})
+            gr["target"]  += c["target"]
+            gr["actual"]  += c["actual"]
+            gr["ref_avg"] += c["ref_avg"]
+            gr["categories"].append(c["category"])
+        group_list = []
+        for g in sorted(groups.values(), key=lambda x: (x["group"] == "Ungrouped", x["group"].lower())):
+            g["target"]  = round(g["target"], 2)
+            g["actual"]  = round(g["actual"], 2)
+            g["ref_avg"] = round(g["ref_avg"], 2)
+            group_list.append(g)
 
         # Tier rollups (savings tier target includes the goal requirement).
         tiers = {t: {"target": 0.0, "actual": 0.0} for t in _BUDGET_TIERS}
@@ -4673,6 +4699,7 @@ def api_budget_plan():
                 "base":     round(base_income, 2),
             },
             "categories": categories,
+            "groups": group_list,
             "tiers": tiers,
             "guardrails": {"need": 50, "want": 30, "savings": 20},
             "planned_total":     planned_total,

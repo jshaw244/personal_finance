@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS transaction_classifications (
   user_category         TEXT,
   user_subcategory      TEXT,
   merchant_normalized   TEXT,
+  source                TEXT DEFAULT 'auto',   -- 'auto' (classifier) | 'user' (manual override, authoritative)
   updated_at            TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE
 );
@@ -290,6 +291,7 @@ CREATE TABLE IF NOT EXISTS budget_plan (
   category      TEXT PRIMARY KEY,
   tier          TEXT NOT NULL DEFAULT 'need',   -- 'need' | 'want' | 'savings'
   target_amount REAL NOT NULL DEFAULT 0,        -- monthly target dollars
+  group_name    TEXT,                           -- optional budget group, e.g. 'Housing'
   sort_order    INTEGER DEFAULT 100,
   updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
 );
