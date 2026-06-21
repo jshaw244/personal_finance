@@ -3628,7 +3628,10 @@ _FLOW_TYPES = ("expense", "income", "refund", "savings", "investment", "internal
 # checking = withdrawal — so savings/investment can be netted (out − back).
 _INVEST_DEST  = ("schwab brokerage moneylink", "edward jones", "transfer from brokerage")
 _SAVINGS_DEST = ("synchrony bank", "online transfer to sv", "online transfer from sv",
-                 "capital one transfer", "schwab bank transfer", "american airlines")
+                 "capital one transfer", "american airlines")
+# Own checking↔checking moves (e.g. Schwab Investor Checking): not savings, not
+# an expense — a plain internal transfer that nets out.
+_TRANSFER_DEST = ("schwab bank transfer",)
 
 
 def _external_transfer_bucket(name: str):
@@ -3637,6 +3640,8 @@ def _external_transfer_bucket(name: str):
         return "investment"
     if any(p in n for p in _SAVINGS_DEST):
         return "savings"
+    if any(p in n for p in _TRANSFER_DEST):
+        return "internal_transfer"
     return None
 
 
