@@ -297,6 +297,15 @@ _INVESTMENT_NAMES = (
     "e*trade", "etrade", "robinhood", "acorns", "wealthfront", "betterment",
 )
 
+# Recurring transfers to the user's savings vehicles. Plaid often mislabels these
+# (CREDIT_CARD_PAYMENT for Synchrony/Capital One, TRAVEL for the AA Credit Union
+# transfer), so we match the names authoritatively. Scoped to depository accounts
+# so a real purchase (e.g. an American Airlines flight on a card) is unaffected.
+_SAVINGS_NAMES = (
+    "synchrony bank", "capital one transfer",
+    "online transfer to sv", "american airlines",
+)
+
 def classify_one(txn_row: dict) -> tuple[int, str | None, str | None, str | None]:
     """
     Returns: (exclude_from_spend, exclude_reason, merchant_normalized, user_category)
@@ -326,6 +335,7 @@ def classify_one(txn_row: dict) -> tuple[int, str | None, str | None, str | None
     pfc_detailed = (pfc.get("detailed") or "").upper()
 
     text = f"{name} {merchant}".strip()
+    acct_type = (txn_row.get("acct_type") or "").lower()
 
     user_category = _PFC_CATEGORY_MAP.get(pfc_primary)
 
@@ -335,6 +345,13 @@ def classify_one(txn_row: dict) -> tuple[int, str | None, str | None, str | None
             return 0, None, merch_norm, "Income"
         else:            # money leaving checking to a person
             return 0, None, merch_norm, "Expense"
+
+    # 1.5) Known savings-vehicle transfers OUT of a spending account → Savings.
+    #      Name-authoritative: must run BEFORE the credit-card-payment check below
+    #      because Plaid tags these as CREDIT_CARD_PAYMENT / TRAVEL. Depository +
+    #      outbound only, so real card purchases of the same merchant are unaffected.
+    if acct_type == "depository" and amount > 0 and any(nm in text for nm in _SAVINGS_NAMES):
+        return 1, "savings_transfer_out", merch_norm, "Savings"
 
     # 2) Credit card payment → exclude
     if "CREDIT_CARD_PAYMENT" in pfc_detailed:
