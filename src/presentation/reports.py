@@ -3839,13 +3839,14 @@ def api_classify_transaction():
 
         conn.execute("""
             INSERT INTO transaction_classifications
-            (transaction_id, user_category, user_subcategory, exclude_from_spend, merchant_normalized, updated_at)
-            VALUES (?,?,?,?,?,datetime('now'))
+            (transaction_id, user_category, user_subcategory, exclude_from_spend, merchant_normalized, source, updated_at)
+            VALUES (?,?,?,?,?, 'user', datetime('now'))
             ON CONFLICT(transaction_id) DO UPDATE SET
                 user_category       = excluded.user_category,
                 user_subcategory    = excluded.user_subcategory,
                 exclude_from_spend  = excluded.exclude_from_spend,
                 merchant_normalized = excluded.merchant_normalized,
+                source              = 'user',
                 updated_at          = excluded.updated_at
         """, (tx_id, category, subcategory, 1 if exclude else 0, merchant_norm))
 
@@ -3860,34 +3861,37 @@ def api_classify_transaction():
             """, (rule_value, category, subcategory, 1 if exclude else 0, amount_exact))
             rule_id = cur.lastrowid
 
-            if apply_existing:
-                # Amount filter clause — only applies when amount_exact is set
-                amt_clause = "AND ABS(t.amount - ?) <= 0.02" if amount_exact is not None else ""
-                amt_param  = [amount_exact] if amount_exact is not None else []
+        # Sweep existing transactions (independent of saving a rule). Matches on
+        # NAME or MERCHANT — same as the rule engine — so name-only patterns like
+        # "synchrony bank transfer" are caught. Marked source='user' (authoritative).
+        if apply_existing and rule_value:
+            amt_clause = "AND ABS(t.amount - ?) <= 0.02" if amount_exact is not None else ""
+            amt_param  = [amount_exact] if amount_exact is not None else []
+            pat = f"%{rule_value}%"
 
-                affected = conn.execute(f"""
-                    UPDATE transaction_classifications
-                    SET user_category=?, user_subcategory=?, exclude_from_spend=?, updated_at=datetime('now')
-                    WHERE transaction_id != ?
-                      AND LOWER(COALESCE(merchant_normalized,'')) LIKE ?
-                      AND transaction_id IN (
-                          SELECT t.transaction_id FROM transactions t
-                          WHERE t.transaction_id = transaction_classifications.transaction_id
-                          {amt_clause}
-                      )
-                """, [category, subcategory, 1 if exclude else 0, tx_id, f"%{rule_value}%"] + amt_param).rowcount
+            affected = conn.execute(f"""
+                UPDATE transaction_classifications
+                SET user_category=?, user_subcategory=?, exclude_from_spend=?,
+                    source='user', updated_at=datetime('now')
+                WHERE transaction_id != ?
+                  AND transaction_id IN (
+                      SELECT t.transaction_id FROM transactions t
+                      WHERE (LOWER(t.name) LIKE ? OR LOWER(COALESCE(t.merchant_name,'')) LIKE ?)
+                        {amt_clause}
+                  )
+            """, [category, subcategory, 1 if exclude else 0, tx_id, pat, pat] + amt_param).rowcount
 
-                affected += conn.execute(f"""
-                    INSERT INTO transaction_classifications
-                    (transaction_id, user_category, user_subcategory, exclude_from_spend, merchant_normalized, updated_at)
-                    SELECT t.transaction_id, ?, ?, ?, LOWER(COALESCE(t.merchant_name,t.name,'')), datetime('now')
-                    FROM transactions t
-                    LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
-                    WHERE tc.transaction_id IS NULL
-                      AND LOWER(COALESCE(t.merchant_name,t.name,'')) LIKE ?
-                      AND t.transaction_id != ?
-                      {amt_clause}
-                """, [category, subcategory, 1 if exclude else 0, f"%{rule_value}%", tx_id] + amt_param).rowcount
+            affected += conn.execute(f"""
+                INSERT INTO transaction_classifications
+                (transaction_id, user_category, user_subcategory, exclude_from_spend, merchant_normalized, source, updated_at)
+                SELECT t.transaction_id, ?, ?, ?, LOWER(COALESCE(t.merchant_name,t.name,'')), 'user', datetime('now')
+                FROM transactions t
+                LEFT JOIN transaction_classifications tc ON tc.transaction_id = t.transaction_id
+                WHERE tc.transaction_id IS NULL
+                  AND (LOWER(t.name) LIKE ? OR LOWER(COALESCE(t.merchant_name,'')) LIKE ?)
+                  AND t.transaction_id != ?
+                  {amt_clause}
+            """, [category, subcategory, 1 if exclude else 0, pat, pat, tx_id] + amt_param).rowcount
 
         conn.commit()
     finally:
