@@ -4713,6 +4713,8 @@ def _flow_totals_summary(conn) -> dict:
         WHERE IFNULL(t.pending, 0) = 0
     """).fetchall()
     tot = {ft: 0.0 for ft in _FLOW_TYPES}
+    # Gross in/out so the rotation is visible (contributions vs. money pulled back).
+    sav_in = sav_out = inv_in = inv_out = 0.0
     dmin = dmax = None
     for r in rows:
         pfcd = ""
@@ -4725,12 +4727,23 @@ def _flow_totals_summary(conn) -> dict:
                                 r["user_category"], r["exclude_reason"], pfcd, r["tx_name"])
         amt = float(r["amount"] or 0)
         tot[ft] += amt if ft in ("savings", "investment") else abs(amt)
+        # amt>0 = money leaving checking (a contribution); amt<0 = money coming back.
+        if ft == "savings":
+            if amt > 0: sav_in += amt
+            else:       sav_out += -amt
+        elif ft == "investment":
+            if amt > 0: inv_in += amt
+            else:       inv_out += -amt
         d = r["date"]
         if d:
             if dmin is None or d < dmin: dmin = d
             if dmax is None or d > dmax: dmax = d
     tot["expense_net"] = round(tot["expense"] - tot["refund"], 2)
     out = {k: round(v, 2) for k, v in tot.items()}
+    out["savings_in"]     = round(sav_in, 2)    # gross contributions into savings
+    out["savings_out"]    = round(sav_out, 2)   # money rotated back out of savings
+    out["investment_in"]  = round(inv_in, 2)    # money moved into investments
+    out["investment_out"] = round(inv_out, 2)   # brokerage drawdown (e.g. car)
 
     months = 1.0
     if dmin and dmax:
@@ -4745,6 +4758,8 @@ def _flow_totals_summary(conn) -> dict:
         "income":      round(out["income"] / months, 2),
         "expense_net": round(out["expense_net"] / months, 2),
         "savings":     round(out["savings"] / months, 2),
+        "savings_in":  round(sav_in / months, 2),
+        "savings_out": round(sav_out / months, 2),
         "investment":  round(out["investment"] / months, 2),
     }
     return out
@@ -4773,10 +4788,13 @@ def _build_ai_context() -> str:
                          f"~{f.get('months','?')} months, net):")
             lines.append(f"  income ${f['income']:,.0f}; true expense ${f['expense_net']:,.0f}; "
                          f"net savings ${f['savings']:,.0f}; net investment ${f['investment']:,.0f} "
-                         f"(negative = intentional brokerage drawdown for car)")
-            lines.append(f"  per-month averages: income ${pm.get('income',0):,.0f}; "
-                         f"expense ${pm.get('expense_net',0):,.0f}; savings ${pm.get('savings',0):,.0f}; "
-                         f"investment ${pm.get('investment',0):,.0f}")
+                         f"(negative = intentional brokerage drawdown for car, kept separate from savings)")
+            lines.append(f"  MONTHLY SAVINGS: net ${pm.get('savings',0):,.0f}/mo "
+                         f"(${pm.get('savings_in',0):,.0f} contributed in, ${pm.get('savings_out',0):,.0f} "
+                         f"rotated back out). Report the NET figure as 'savings per month'; the brokerage/car "
+                         f"drawdown is investment, not savings.")
+            lines.append(f"  other per-month averages: income ${pm.get('income',0):,.0f}; "
+                         f"expense ${pm.get('expense_net',0):,.0f}; net investment ${pm.get('investment',0):,.0f}")
         except Exception:
             pass
 
@@ -5232,8 +5250,10 @@ _AI_TOOLS = [
         "name": "get_flow_summary",
         "description": "Net flow totals over all history: income, true expense, net savings, net "
                        "investment. Also returns the covered date range (period_start, period_end, "
-                       "months) and per_month averages — use per_month.savings for average monthly "
-                       "savings, etc.",
+                       "months), a savings in/out split (savings_in = contributions, savings_out = "
+                       "money rotated back out), and per_month averages. For 'savings per month' use "
+                       "per_month.savings (net); mention per_month.savings_in / savings_out for the "
+                       "breakdown. The brokerage/car drawdown is investment, NOT savings.",
         "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
