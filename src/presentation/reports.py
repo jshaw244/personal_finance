@@ -3809,7 +3809,6 @@ def api_classify_transaction():
     category       = body.get("category") or None
     subcategory    = body.get("subcategory") or None
     exclude        = bool(body.get("exclude_from_spend", False))
-    create_rule    = bool(body.get("create_rule", False))
     rule_value     = (body.get("rule_match_value") or "").strip().lower()
     apply_existing = bool(body.get("apply_to_existing", False))
     # None = any amount; float = exact amount match (±$0.02)
@@ -3828,7 +3827,6 @@ def api_classify_transaction():
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=30000;")
     conn.row_factory = sqlite3.Row
-    rule_id = None
     affected = 0
     try:
         tx = conn.execute(
@@ -3850,18 +3848,7 @@ def api_classify_transaction():
                 updated_at          = excluded.updated_at
         """, (tx_id, category, subcategory, 1 if exclude else 0, merchant_norm))
 
-        if create_rule and rule_value:
-            cur = conn.execute("""
-                INSERT INTO classification_rules
-                (enabled, priority, match_field, match_op, match_value,
-                 user_category, user_subcategory, exclude_from_spend, amount_exact,
-                 created_at, updated_at)
-                VALUES (1, 100, 'merchant_normalized', 'contains', ?, ?, ?, ?, ?,
-                        datetime('now'), datetime('now'))
-            """, (rule_value, category, subcategory, 1 if exclude else 0, amount_exact))
-            rule_id = cur.lastrowid
-
-        # Sweep existing transactions (independent of saving a rule). Matches on
+        # Sweep existing transactions (bulk retag). Matches on
         # NAME or MERCHANT — same as the rule engine — so name-only patterns like
         # "synchrony bank transfer" are caught. Marked source='user' (authoritative).
         if apply_existing and rule_value:
@@ -3897,38 +3884,7 @@ def api_classify_transaction():
     finally:
         conn.close()
 
-    return jsonify({"ok": True, "rule_id": rule_id, "affected": affected})
-
-
-@reports_bp.route("/api/classification_rules")
-@login_required
-def api_list_rules():
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(
-            "SELECT rule_id, enabled, priority, match_field, match_op, match_value, "
-            "user_category, user_subcategory, exclude_from_spend, created_at "
-            "FROM classification_rules ORDER BY priority, created_at"
-        ).fetchall()
-    finally:
-        conn.close()
-    return jsonify([dict(r) for r in rows])
-
-
-@reports_bp.route("/api/classification_rules/<int:rule_id>", methods=["DELETE"])
-@login_required
-def api_delete_rule(rule_id):
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout=30000;")
-    try:
-        conn.execute("DELETE FROM classification_rules WHERE rule_id = ?", (rule_id,))
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "affected": affected})
 
 
 @reports_bp.route("/merchants")
@@ -3990,12 +3946,11 @@ def api_merchants():
 @reports_bp.route("/api/merchants/classify", methods=["POST"])
 @login_required
 def api_classify_merchant():
-    """Set category + optionally create rule for ALL transactions of a merchant."""
+    """Set category for ALL transactions of a merchant (authoritative)."""
     body         = request.get_json() or {}
     merchant_key = (body.get("merchant_key") or "").strip().lower()
     category     = body.get("category") or None
     exclude      = bool(body.get("exclude_from_spend", False))
-    create_rule  = bool(body.get("create_rule", True))
 
     if not merchant_key:
         return jsonify({"error": "merchant_key required"}), 400
@@ -4005,7 +3960,6 @@ def api_classify_merchant():
     conn.execute("PRAGMA busy_timeout=30000;")
     conn.row_factory = sqlite3.Row
     updated = 0
-    rule_id = None
     try:
         # Get all matching transaction_ids
         tx_ids = [r[0] for r in conn.execute("""
@@ -4017,30 +3971,22 @@ def api_classify_merchant():
         for tx_id in tx_ids:
             conn.execute("""
                 INSERT INTO transaction_classifications
-                (transaction_id, user_category, exclude_from_spend, merchant_normalized, updated_at)
-                VALUES (?, ?, ?, ?, datetime('now'))
+                (transaction_id, user_category, exclude_from_spend, merchant_normalized, source, updated_at)
+                VALUES (?, ?, ?, ?, 'user', datetime('now'))
                 ON CONFLICT(transaction_id) DO UPDATE SET
                     user_category      = excluded.user_category,
                     exclude_from_spend = excluded.exclude_from_spend,
                     merchant_normalized= excluded.merchant_normalized,
+                    source             = 'user',
                     updated_at         = excluded.updated_at
             """, (tx_id, category, 1 if exclude else 0, merchant_key))
         updated = len(tx_ids)
-
-        if create_rule and merchant_key:
-            cur = conn.execute("""
-                INSERT INTO classification_rules
-                (enabled, priority, match_field, match_op, match_value,
-                 user_category, exclude_from_spend, created_at, updated_at)
-                VALUES (1, 100, 'merchant_normalized', 'contains', ?, ?, ?, datetime('now'), datetime('now'))
-            """, (merchant_key, category, 1 if exclude else 0))
-            rule_id = cur.lastrowid
 
         conn.commit()
     finally:
         conn.close()
 
-    return jsonify({"ok": True, "updated": updated, "rule_id": rule_id})
+    return jsonify({"ok": True, "updated": updated})
 
 
 @reports_bp.route("/api/debug_state")
