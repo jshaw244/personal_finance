@@ -228,8 +228,8 @@
          word-break:break-all;background:#f8f9fa;padding:.35rem .5rem;border-radius:4px"></div>
 
     <label style="margin-bottom:.4rem">
-      <input type="checkbox" id="chk-create-rule" checked onchange="toggleRuleOptions()">
-      <span>Create a rule — apply <b id="modal-cat"></b> to future transactions whose description contains:</span>
+      <input type="checkbox" id="chk-apply-existing" checked onchange="toggleApplyOptions()">
+      <span>Also apply <b id="modal-cat"></b> to other <em>existing</em> transactions whose description contains:</span>
     </label>
     <div id="rule-pattern-wrap" style="margin:.2rem 0 .6rem 1.4rem">
       <input type="text" id="modal-rule-pattern"
@@ -250,13 +250,9 @@
       </label>
     </div>
 
-    <label>
-      <input type="checkbox" id="chk-apply-existing" checked>
-      <span>Also update all <em>existing</em> transactions matching the pattern above to <b id="modal-cat2"></b></span>
-    </label>
     <div class="modal-actions">
       <button class="btn-sm btn-ghost" onclick="cancelModal()">Just this one</button>
-      <button class="btn-sm btn-primary" onclick="confirmModal()">Save</button>
+      <button class="btn-sm btn-primary" onclick="confirmModal()">Apply</button>
     </div>
   </div>
 </div>
@@ -454,7 +450,6 @@ function submitCustomCat(e, inputEl) {
   document.getElementById('modal-desc').innerHTML = `Setting <b>${escHtml(cat)}</b> for this transaction:`;
   document.getElementById('modal-tx-name').textContent = txName || merchantNorm || '(unknown)';
   document.getElementById('modal-cat').textContent  = cat;
-  document.getElementById('modal-cat2').textContent = cat;
   const amtLabel = txAmount != null ? '$' + txAmount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
   document.getElementById('modal-tx-amount').textContent = amtLabel;
   document.getElementById('rule-amt-any').checked = true;
@@ -507,7 +502,6 @@ function onCategorySelected(selectEl) {
     `Setting <b>${escHtml(cat)}</b> for this transaction:`;
   document.getElementById('modal-tx-name').textContent = txName || merchantNorm || '(unknown)';
   document.getElementById('modal-cat').textContent  = cat;
-  document.getElementById('modal-cat2').textContent = cat;
 
   // Amount radio label
   const amtLabel = txAmount != null ? '$' + txAmount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
@@ -530,25 +524,24 @@ function cancelModal() {
   closeModal();
 }
 
-function toggleRuleOptions() {
-  const show = document.getElementById('chk-create-rule').checked;
+function toggleApplyOptions() {
+  const show = document.getElementById('chk-apply-existing').checked;
   document.getElementById('rule-pattern-wrap').style.opacity = show ? '' : '.4';
   document.getElementById('rule-amount-wrap').style.opacity  = show ? '' : '.4';
 }
 
 function confirmModal() {
   if (!pendingClassify) { closeModal(); return; }
-  const createRule    = document.getElementById('chk-create-rule').checked;
   const applyExisting = document.getElementById('chk-apply-existing').checked;
   const rulePattern   = document.getElementById('modal-rule-pattern').value.trim().toLowerCase()
                         || pendingClassify.merchant_norm;
   const useExactAmt   = document.getElementById('rule-amt-exact').checked;
-  const amountExact   = (createRule && useExactAmt && pendingClassify.tx_amount != null)
+  const amountExact   = (applyExisting && useExactAmt && pendingClassify.tx_amount != null)
                         ? pendingClassify.tx_amount : null;
 
   saveClassify(
     pendingClassify.tx_id, pendingClassify.category,
-    rulePattern, createRule, applyExisting, pendingClassify.row, amountExact
+    rulePattern, false, applyExisting, pendingClassify.row, amountExact
   );
   closeModal();
 }
@@ -566,12 +559,11 @@ function closeModal() {
   pendingClassify = null;
 }
 
-async function saveClassify(txId, category, merchantNorm, createRule, applyExisting, rowEl, amountExact = null) {
+async function saveClassify(txId, category, merchantNorm, _unused, applyExisting, rowEl, amountExact = null) {
   try {
     const body = {
       transaction_id:   txId,
       category,
-      create_rule:      createRule,
       rule_match_value: merchantNorm,
       apply_to_existing:applyExisting,
     };

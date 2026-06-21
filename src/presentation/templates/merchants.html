@@ -299,10 +299,6 @@ function renderTable(data) {
             <input type="checkbox" id="excl-${CSS.escape(m.merchant_key)}" ${m.any_excluded?'checked':''}>
             Exclude from spend analysis
           </label>
-          <label>
-            <input type="checkbox" id="rule-${CSS.escape(m.merchant_key)}" checked>
-            Also create/update rule for future transactions
-          </label>
         </div>
         <div class="edit-actions" style="margin-top:.6rem">
           <button class="btn-save"   onclick="saveEdit('${escHtml(m.merchant_key)}',event)">Save</button>
@@ -341,7 +337,6 @@ async function saveEdit(key, e) {
   e.stopPropagation();
   const category   = document.getElementById('sel-'  + CSS.escape(key)).value;
   const exclude    = document.getElementById('excl-' + CSS.escape(key)).checked;
-  const createRule = document.getElementById('rule-' + CSS.escape(key)).checked;
 
   const btn = e.target;
   btn.disabled = true; btn.textContent = 'Saving…';
@@ -350,7 +345,7 @@ async function saveEdit(key, e) {
     const resp = await fetch('/reports/api/merchants/classify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ merchant_key: key, category: category || null, exclude_from_spend: exclude, create_rule: createRule }),
+      body: JSON.stringify({ merchant_key: key, category: category || null, exclude_from_spend: exclude }),
     }).then(r => r.json());
 
     // Update local data
