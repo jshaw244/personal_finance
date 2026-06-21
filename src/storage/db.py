@@ -786,10 +786,13 @@ def get_transactions_for_classification(days: int = 365, item_id: str | None = N
               t.name,
               t.merchant_name,
               t.amount,
+              a.type AS acct_type,
               tm.payload_json AS meta_json
             FROM transactions t
             LEFT JOIN transaction_meta tm
               ON tm.transaction_id = t.transaction_id
+            LEFT JOIN accounts a
+              ON a.account_id = t.account_id
             WHERE {" AND ".join(where)}
         """
         rows = conn.execute(sql, params).fetchall()
