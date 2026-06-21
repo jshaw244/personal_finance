@@ -38,10 +38,31 @@ def _execute_schema_sql(conn: sqlite3.Connection) -> None:
 # -----------------------------
 # Core DB Setup
 # -----------------------------
+def _migrate_columns(conn) -> None:
+    """Add columns introduced after a DB was first created (CREATE IF NOT EXISTS
+    won't alter an existing table). Safe/idempotent."""
+    wanted = {
+        "transaction_classifications": [("source", "TEXT DEFAULT 'auto'")],
+        "budget_plan":                 [("group_name", "TEXT")],
+    }
+    for table, cols in wanted.items():
+        try:
+            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        except Exception:
+            continue
+        for name, decl in cols:
+            if name not in existing:
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                except Exception:
+                    pass
+
+
 def init_db() -> None:
     with _db_connect() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         _execute_schema_sql(conn)
+        _migrate_columns(conn)
         conn.commit()
 
 # -----------------------------
@@ -711,6 +732,48 @@ def upsert_transaction_classification(
               user_category=COALESCE(transaction_classifications.user_category, excluded.user_category),
               user_subcategory=COALESCE(transaction_classifications.user_subcategory, excluded.user_subcategory),
               merchant_normalized=COALESCE(transaction_classifications.merchant_normalized, excluded.merchant_normalized),
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                transaction_id,
+                int(bool(exclude_from_spend)),
+                exclude_reason,
+                user_category,
+                user_subcategory,
+                merchant_normalized,
+            ),
+        )
+        conn.commit()
+
+
+def set_user_transaction_classification(
+    transaction_id: str,
+    exclude_from_spend: int = 0,
+    exclude_reason: str | None = None,
+    user_category: str | None = None,
+    user_subcategory: str | None = None,
+    merchant_normalized: str | None = None,
+) -> None:
+    """Authoritative manual override: FULLY overwrites the row and marks it
+    source='user' so the auto-classifier never clobbers it on later syncs.
+    (Unlike upsert_transaction_classification, which preserves existing values.)"""
+    with _db_connect() as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute(
+            """
+            INSERT INTO transaction_classifications (
+              transaction_id, exclude_from_spend, exclude_reason,
+              user_category, user_subcategory, merchant_normalized,
+              source, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'user', CURRENT_TIMESTAMP)
+            ON CONFLICT(transaction_id) DO UPDATE SET
+              exclude_from_spend=excluded.exclude_from_spend,
+              exclude_reason=excluded.exclude_reason,
+              user_category=excluded.user_category,
+              user_subcategory=excluded.user_subcategory,
+              merchant_normalized=COALESCE(excluded.merchant_normalized, transaction_classifications.merchant_normalized),
+              source='user',
               updated_at=CURRENT_TIMESTAMP
             """,
             (

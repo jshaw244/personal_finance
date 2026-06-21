@@ -60,6 +60,10 @@
       .minibar.ok { background: #27ae60; }
       .minibar.over { background: #c0392b; }
       tbody tr.group-head td { background: #fafbfc; font-weight: 700; color: #444; }
+      tbody tr.grp-sub td { background: #fcfdff; }
+      input.group-in { width: 120px; font-size: .85rem; }
+      .rm-btn { border: none; background: transparent; color: #c0392b; cursor: pointer; font-size: .95rem; opacity: .55; }
+      .rm-btn:hover { opacity: 1; }
       #save-status { margin-left: .8rem; }
     </style>
   </head>
@@ -119,17 +123,31 @@
       <table>
         <thead>
           <tr>
-            <th>Category</th><th>Tier</th>
+            <th>Category</th><th>Group</th><th>Tier</th>
             <th class="num">Target / mo</th>
             <th class="num">This month</th>
             <th>Progress</th>
             <th class="num">3-mo avg</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="cat-body"></tbody>
       </table>
-      <p class="small">Tip: a quick start is to copy the 3-month average into the target for each Need,
-         then trim Wants. Your Savings target auto-includes your active goal's required monthly amount.</p>
+
+      <div class="row" style="margin-top:.8rem; padding-top:.7rem; border-top:1px dashed #e3e6ea;">
+        <input id="new-cat" type="text" placeholder="New category name" style="width:180px">
+        <input id="new-group" list="grouplist" type="text" placeholder="Group (optional)" style="width:150px">
+        <select id="new-tier">
+          <option value="need">Need</option><option value="want" selected>Want</option><option value="savings">Savings</option>
+        </select>
+        <span>$<input id="new-target" type="number" min="0" step="10" placeholder="0" style="width:90px"></span>
+        <button class="btn" style="background:#e9ecef;color:#333" onclick="addCategory()">+ Add category</button>
+      </div>
+
+      <p class="small">Tip: type a <strong>Group</strong> (e.g. "Housing") on related categories — Mortgage, Real Estate
+         Taxes, Homeowners Insurance — and they roll up together. The ✕ removes a category from the budget
+         (transactions keep their label). Savings target auto-includes your active goal's required monthly amount.</p>
+      <datalist id="grouplist"></datalist>
     </div>
 
     <script>
@@ -139,6 +157,8 @@
     const TIERS = ['need','want','savings'];
     const TIER_LABEL = { need:'Need', want:'Want', savings:'Savings' };
     let DATA = null;
+    let DELETED = new Set();
+    const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 
     async function fetchJSON(url, opts){ const r=await fetch(url,opts); if(!r.ok) throw new Error(await r.text()); return r.json(); }
 
@@ -153,55 +173,113 @@
       return `<span class="tier-pill" style="color:${c};background:${bg}">${TIER_LABEL[t]}</span>`;
     }
 
+    function existingGroups(){
+      return [...new Set(DATA.categories.map(c=>c.group).filter(Boolean))].sort();
+    }
+
+    function catRow(c){
+      const pct = c.target>0 ? Math.min(100, 100*c.actual/c.target) : 0;
+      const over = c.target>0 && c.actual>c.target;
+      const tr=document.createElement('tr');
+      if(c.group) tr.className='grp-sub';
+      tr.innerHTML = `
+        <td style="${c.group?'padding-left:1.6rem':''}">${esc(c.category)}</td>
+        <td><input list="grouplist" class="group-in" data-cat="${esc(c.category)}" value="${esc(c.group||'')}" placeholder="—"></td>
+        <td><select data-cat="${esc(c.category)}" class="tier-sel">
+          ${TIERS.map(tt=>`<option value="${tt}" ${tt===c.tier?'selected':''}>${TIER_LABEL[tt]}</option>`).join('')}
+        </select></td>
+        <td class="num"><input type="number" min="0" step="10" class="target-in"
+             data-cat="${esc(c.category)}" value="${c.target||''}" placeholder="${c.ref_avg||0}"></td>
+        <td class="num">${money2(c.actual)}</td>
+        <td><span class="miniwrap"><span class="minibar ${over?'over':'ok'}" style="width:${pct}%"></span></span></td>
+        <td class="num small">${money2(c.ref_avg)}</td>
+        <td><button class="rm-btn" data-cat="${esc(c.category)}" title="Remove from budget">✕</button></td>`;
+      return tr;
+    }
+
     function renderCategories(){
       const body = $('cat-body'); body.innerHTML='';
-      // group by tier for readability
       for(const t of TIERS){
-        const rows = DATA.categories.filter(c=>c.tier===t)
-                       .sort((a,b)=> b.actual - a.actual);
+        const rows = DATA.categories.filter(c=>c.tier===t);
         const head = document.createElement('tr');
         head.className='group-head';
-        head.innerHTML = `<td colspan="6">${TIER_LABEL[t]}s</td>`;
+        head.innerHTML = `<td colspan="8">${TIER_LABEL[t]}s</td>`;
         body.appendChild(head);
-        if(t==='savings'){
-          // synthetic goal row
-          if(DATA.goal && DATA.goal.need_monthly>0){
-            const tr=document.createElement('tr');
-            tr.innerHTML = `<td>${DATA.goal.name||'Savings goal'} <span class="small">(goal)</span></td>
-              <td>${tierPill('savings')}</td>
-              <td class="num">${money2(DATA.goal.need_monthly)}</td>
-              <td class="num small">auto</td><td></td><td class="num"></td>`;
-            body.appendChild(tr);
-          }
-        }
-        for(const c of rows){
-          const pct = c.target>0 ? Math.min(100, 100*c.actual/c.target) : 0;
-          const over = c.target>0 && c.actual>c.target;
+
+        if(t==='savings' && DATA.goal && DATA.goal.need_monthly>0){
           const tr=document.createElement('tr');
-          tr.innerHTML = `
-            <td>${c.category}</td>
-            <td><select data-cat="${c.category}" class="tier-sel">
-              ${TIERS.map(tt=>`<option value="${tt}" ${tt===c.tier?'selected':''}>${TIER_LABEL[tt]}</option>`).join('')}
-            </select></td>
-            <td class="num"><input type="number" min="0" step="10" class="target-in"
-                 data-cat="${c.category}" value="${c.target||''}" placeholder="${c.ref_avg||0}"></td>
-            <td class="num">${money2(c.actual)}</td>
-            <td><span class="miniwrap"><span class="minibar ${over?'over':'ok'}" style="width:${pct}%"></span></span></td>
-            <td class="num small">${money2(c.ref_avg)}</td>`;
+          tr.innerHTML = `<td>${esc(DATA.goal.name||'Savings goal')} <span class="small">(goal)</span></td>
+            <td></td><td>${tierPill('savings')}</td>
+            <td class="num">${money2(DATA.goal.need_monthly)}</td>
+            <td class="num small">auto</td><td></td><td class="num"></td><td></td>`;
           body.appendChild(tr);
         }
+
+        // sub-group by group within the tier (Ungrouped last)
+        const byGroup = {};
+        rows.forEach(c=> (byGroup[c.group||' '] = byGroup[c.group||' '] || []).push(c));
+        const gnames = Object.keys(byGroup).sort((a,b)=> (a===' ') - (b===' ') || a.localeCompare(b));
+        for(const g of gnames){
+          const gcats = byGroup[g].sort((a,b)=> b.actual - a.actual);
+          if(g !== ' '){
+            const gt = gcats.reduce((s,c)=>s+(c.target||0),0);
+            const ga = gcats.reduce((s,c)=>s+c.actual,0);
+            const gover = gt>0 && ga>gt;
+            const gh=document.createElement('tr');
+            gh.innerHTML = `<td colspan="3" style="padding-left:1rem;font-weight:700;color:#444">▸ ${esc(g)}</td>
+              <td class="num" style="font-weight:700">${money2(gt)}</td>
+              <td class="num" style="font-weight:700;color:${gover?'#c0392b':'inherit'}">${money2(ga)}</td>
+              <td colspan="3"></td>`;
+            body.appendChild(gh);
+          }
+          gcats.forEach(c=> body.appendChild(catRow(c)));
+        }
       }
+
+      // refresh group autocomplete
+      $('grouplist').innerHTML = existingGroups().map(g=>`<option value="${esc(g)}">`).join('');
+
       body.querySelectorAll('.target-in').forEach(el=>el.addEventListener('input', recompute));
-      body.querySelectorAll('.tier-sel').forEach(el=>el.addEventListener('change', e=>{
-        const cat=e.target.getAttribute('data-cat');
-        const c=DATA.categories.find(x=>x.category===cat); if(c){ c.tier=e.target.value; renderCategories(); recompute(); }
+      body.querySelectorAll('.group-in').forEach(el=>el.addEventListener('change', e=>{
+        const c=DATA.categories.find(x=>x.category===e.target.getAttribute('data-cat'));
+        if(c){ c.group = e.target.value.trim() || null; renderCategories(); recompute(); }
       }));
+      body.querySelectorAll('.tier-sel').forEach(el=>el.addEventListener('change', e=>{
+        const c=DATA.categories.find(x=>x.category===e.target.getAttribute('data-cat'));
+        if(c){ c.tier=e.target.value; renderCategories(); recompute(); }
+      }));
+      body.querySelectorAll('.rm-btn').forEach(el=>el.addEventListener('click', e=>
+        removeCategory(e.currentTarget.getAttribute('data-cat'))));
+    }
+
+    function removeCategory(cat){
+      if(!confirm(`Remove "${cat}" from the budget?\n(Transactions keep this category — it just loses its target & group here.)`)) return;
+      readInputsIntoData();
+      DATA.categories = DATA.categories.filter(c=>c.category!==cat);
+      DELETED.add(cat);
+      renderCategories(); recompute();
+    }
+
+    function addCategory(){
+      const name=$('new-cat').value.trim(); if(!name) return;
+      if(DATA.categories.some(c=>c.category.toLowerCase()===name.toLowerCase())){ alert('That category already exists.'); return; }
+      readInputsIntoData();
+      DATA.categories.push({category:name, tier:$('new-tier').value,
+        target:parseFloat($('new-target').value)||0, actual:0, ref_avg:0,
+        group:$('new-group').value.trim()||null, saved:false});
+      DELETED.delete(name);
+      $('new-cat').value=''; $('new-group').value=''; $('new-target').value='';
+      renderCategories(); recompute();
     }
 
     function readInputsIntoData(){
       document.querySelectorAll('.target-in').forEach(el=>{
         const c=DATA.categories.find(x=>x.category===el.getAttribute('data-cat'));
         if(c) c.target = parseFloat(el.value)||0;
+      });
+      document.querySelectorAll('.group-in').forEach(el=>{
+        const c=DATA.categories.find(x=>x.category===el.getAttribute('data-cat'));
+        if(c) c.group = el.value.trim() || null;
       });
       DATA.income.expected = parseFloat($('expected-income').value)||0;
     }
@@ -245,9 +323,12 @@
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
             expected_income: DATA.income.expected,
-            categories: DATA.categories.map(c=>({category:c.category, tier:c.tier, target_amount:c.target||0})),
+            categories: DATA.categories.map(c=>({category:c.category, tier:c.tier,
+              target_amount:c.target||0, group:c.group||null})),
+            delete: [...DELETED],
           }),
         });
+        DELETED.clear();
         $('save-status').textContent='Saved ✓';
         setTimeout(()=>$('save-status').textContent='', 2500);
       }catch(e){ $('save-status').textContent='Error: '+e.message; }
