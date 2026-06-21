@@ -4350,6 +4350,51 @@ def api_goals():
     return jsonify({"current_total": current_total, "goals": goals})
 
 
+@reports_bp.route("/api/goals/<int:goal_id>", methods=["PATCH"])
+@login_required
+def api_goal_update(goal_id):
+    """Edit a goal in place. Updates name / target_amount / start_date / end_date.
+    The baseline (start_balance) is preserved so progress is NOT reset — unless
+    `rebase=true` is passed, which re-snapshots today's savings as the baseline."""
+    conn = _goals_connect()
+    try:
+        _ensure_savings_goals_table(conn)
+        goal = conn.execute("SELECT * FROM savings_goals WHERE id=?", (goal_id,)).fetchone()
+        if not goal:
+            return jsonify({"error": "goal not found"}), 404
+
+        body = request.get_json(silent=True) or {}
+        fields, params = [], []
+
+        if "name" in body:
+            fields.append("name=?"); params.append((body.get("name") or "").strip()[:80])
+        if "target_amount" in body:
+            try:
+                target = float(body.get("target_amount"))
+            except (TypeError, ValueError):
+                return jsonify({"error": "target_amount must be a number"}), 400
+            if target <= 0:
+                return jsonify({"error": "target_amount must be positive"}), 400
+            fields.append("target_amount=?"); params.append(target)
+        if body.get("start_date"):
+            fields.append("start_date=?"); params.append(str(body["start_date"])[:10])
+        if body.get("end_date"):
+            fields.append("end_date=?"); params.append(str(body["end_date"])[:10])
+        if body.get("rebase"):
+            fields.append("start_balance=?"); params.append(_total_savings_now(conn))
+
+        if not fields:
+            return jsonify({"error": "no fields to update"}), 400
+
+        params.append(goal_id)
+        conn.execute(f"UPDATE savings_goals SET {', '.join(fields)} WHERE id=?", params)
+        conn.commit()
+        updated = conn.execute("SELECT * FROM savings_goals WHERE id=?", (goal_id,)).fetchone()
+        return jsonify(_compute_goal_stats(updated, _total_savings_now(conn)))
+    finally:
+        conn.close()
+
+
 @reports_bp.route("/api/goals/<int:goal_id>", methods=["DELETE"])
 @login_required
 def api_goal_delete(goal_id):

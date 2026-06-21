@@ -133,6 +133,7 @@
     const $ = id => document.getElementById(id);
     const money  = n => '$' + Number(n||0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
     const money2 = n => '$' + Number(n||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    const escA = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 
     let SUGGEST = { suggested: 0, stretch: 0, end_date: null };
     let SELECTED = 'starter';
@@ -206,6 +207,26 @@
       await fetch('/reports/api/goals/' + id + '/achieve', { method: 'POST' });
       loadGoals();
     }
+    function toggleEdit(id) {
+      const el = $('edit-' + id);
+      el.style.display = (el.style.display === 'none' || !el.style.display) ? 'flex' : 'none';
+    }
+    async function saveGoal(id) {
+      const target = parseFloat($('edit-target-' + id).value);
+      if (!target || target <= 0) { alert('Enter a positive target amount.'); return; }
+      try {
+        await fetchJSON('/reports/api/goals/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: $('edit-name-' + id).value.trim(),
+            target_amount: target,
+            end_date: $('edit-end-' + id).value,
+          }),
+        });
+        await loadGoals();
+      } catch (e) { alert('Could not save: ' + e.message); }
+    }
 
     function fmtDate(s) {
       const d = new Date(s + 'T00:00:00');
@@ -248,7 +269,19 @@
 
         <div class="goal-chart" id="chart-${g.id}"></div>
 
+        <div class="goal-edit" id="edit-${g.id}" style="display:none; margin-top:.6rem; gap:.5rem; flex-wrap:wrap; align-items:center;">
+          <input type="text" id="edit-name-${g.id}" value="${escA(g.name)}"
+                 style="flex:1 1 200px;padding:.35rem .5rem;border:1px solid #ccd;border-radius:6px;">
+          <label class="small">Target $<input type="number" id="edit-target-${g.id}" value="${g.target_amount}"
+                 min="1" step="50" style="width:110px;padding:.35rem .5rem;border:1px solid #ccd;border-radius:6px;"></label>
+          <label class="small">By <input type="date" id="edit-end-${g.id}" value="${g.end_date}"
+                 style="padding:.3rem .5rem;border:1px solid #ccd;border-radius:6px;"></label>
+          <button class="btn btn-primary" onclick="saveGoal(${g.id})">Save</button>
+          <button class="btn btn-ghost" onclick="toggleEdit(${g.id})">Cancel</button>
+        </div>
+
         <div class="goal-actions">
+          <button class="btn btn-ghost" onclick="toggleEdit(${g.id})">Edit</button>
           ${g.achieved ? '' : `<button class="btn btn-ghost" onclick="achieveGoal(${g.id})">Mark achieved</button>`}
           <button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button>
         </div>`;
